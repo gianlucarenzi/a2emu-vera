@@ -10,3 +10,4 @@ examples/*/*.img
 /a2run
 /a2emu.exe
 examples/*/*.png
+!examples/vera/font*.bin
