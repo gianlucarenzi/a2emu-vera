@@ -1,0 +1,28 @@
+#!/bin/bash
+# a2emu-vera launcher wrapper: starts a2emu and automatically positions windows.
+# Windows are positioned using wmctrl: a2emu (Reinette) TOP-LEFT, VERA BOTTOM-RIGHT.
+# The mouse cursor is hidden by a2emu itself.
+#
+# Usage: a2emu-vera [a2emu-options]
+# Example: a2emu-vera disk.po
+#          A2_MODEL=iiee a2emu-vera --aux 64 disk.po
+
+set -e
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Find the actual a2emu executable (one level up if in scripts/)
+A2EMU_DIR="$(dirname "$SCRIPT_DIR")"
+[ -x "$A2EMU_DIR/a2emu" ] || A2EMU_DIR="$SCRIPT_DIR"
+
+# Start a2emu in background, then position windows
+"$A2EMU_DIR/a2emu" "$@" &
+A2EMU_PID=$!
+
+# Give a2emu time to create windows, then position them
+sleep 0.5
+"$SCRIPT_DIR/a2emu-vera-windows" || true
+
+# Wait for a2emu to finish
+wait $A2EMU_PID

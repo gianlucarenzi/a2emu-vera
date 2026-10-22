@@ -160,6 +160,10 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 
+	/* Hide mouse cursor - positioning and focus handled by window manager */
+	SDL_ShowCursor(SDL_DISABLE);
+	SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+
 	SDL_Window *wdo = SDL_CreateWindow("Reinette ][+", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 280 * zoom, 192 * zoom, SDL_WINDOW_OPENGL);
 	SDL_Renderer *rdr = SDL_CreateRenderer(wdo, -1, SDL_RENDERER_ACCELERATED);   /* paced by the wall clock below, not vsync */
 	SDL_SetRenderDrawBlendMode(rdr, SDL_BLENDMODE_NONE);                          // SDL_BLENDMODE_BLEND);

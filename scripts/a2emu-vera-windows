@@ -1,0 +1,43 @@
+#!/bin/bash
+# a2emu-vera-windows: Position a2emu and VERA windows using wmctrl.
+# Windows are positioned non-overlapping: a2emu (Reinette) TOP-LEFT, VERA BOTTOM-RIGHT.
+# For MATE desktop with dual displays:
+#   DP-1: 2560x1440+0+0 (left, not primary)
+#   DP-2: 2560x1440+2560+0 (right, primary, where windows should appear)
+#   Panels: 24px top/bottom, frame extents 2,2,34,2
+#
+# Usage: a2emu-vera-windows [OPTIONS]
+#   By default, positions for DP-2 (right display, primary).
+#   --left: Position for DP-1 (left display)
+#   --help: Show this help message
+
+set -e
+
+# Default positions (DP-2, right display)
+REINETTE_POS="0,2560,24,-1,-1"
+VERA_POS="0,4476,900,-1,-1"
+
+# Parse options
+case "${1:-}" in
+    --left)
+        # DP-1 (left display): a2emu at (0, 24), VERA at (1216, 900)
+        REINETTE_POS="0,0,24,-1,-1"
+        VERA_POS="0,1216,900,-1,-1"
+        ;;
+    --help|-h)
+        head -20 "$0" | tail -16
+        exit 0
+        ;;
+esac
+
+# Wait for windows to appear and position them
+# Retry a few times as windows may take time to open
+for attempt in 1 2 3 4 5; do
+    if wmctrl -r "Reinette ][+" -e "$REINETTE_POS" 2>/dev/null; then
+        wmctrl -r "VERA (a2_vera)" -e "$VERA_POS" 2>/dev/null || true
+        break
+    fi
+    sleep 0.5
+done
+
+exit 0
