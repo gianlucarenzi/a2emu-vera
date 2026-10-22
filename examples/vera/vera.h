@@ -82,9 +82,11 @@ extern unsigned char vera_slot;
 
 /* Find the card: for slots 1-7, skip the ones with disk-controller firmware
  * ($Cn01/$Cn03/$Cn05 = $20/$00/$03: Disk II, ProDOS block devices), select
- * DCSEL 63 and check the identity bytes $09 = 'V', $0A = major >= 47.  A
- * write/read-back of ADDR_L is not enough: other cards and the floating bus
- * can echo it.  CTRL and ADDR are left at 0.  Returns the slot, 0 if none. */
+ * DCSEL 63 and check the identity bytes $09 = 'V', $0A = major >= 47, twice,
+ * with CTRL reading back $7E / $00.  A write/read-back of ADDR_L is not
+ * enough, nor one identity read: other cards and the floating bus of an empty
+ * slot can show those bytes once.  CTRL and ADDR are left at 0.  Returns the
+ * slot, 0 if none. */
 unsigned char vera_detect(void);
 
 /* Wait for the start of the next VERA frame (polls ISR VSYNC, no IRQ needed). */

@@ -11,7 +11,11 @@ For slots 1-7:
    disk-controller firmware (Disk II, ProDOS block devices) and is skipped, so
    nothing is written to it.
 2. `CTRL = $7E` (DCSEL 63), then the identity bytes: `$Cn09 = 'V'` and
-   `$Cn0A` (major version) `>= 47`; `CTRL = 0` again.
+   `$Cn0A` (major version) `>= 47`; `CTRL = 0` again.  CTRL must read back
+   `$7E` and `$00`, and the identity must read the same a second time: an
+   empty slot reads the floating bus, which can show 'V' and a byte >= 47 once
+   (it did, in slot 3 of an enhanced IIe without the 80-column card, with the
+   first version of this probe).
 3. On a match `vera` points at `$Cn00`, `vera_slot = n`, ADDR is cleared.
 
 A write/read-back of ADDR_L (the first version) is not a valid probe: other cards

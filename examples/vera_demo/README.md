@@ -7,7 +7,7 @@ Booted straight from the floppy (no DOS), it finds the A2VERA card in any slot a
 - draws diagonal colour bands with a frame of colour 1 (76,800 bytes through
   DATA0, increment 1) with the layer off, then enables it (`DC_VIDEO = $11`);
 - opens a 32-pixel border (DCSEL 1: HSTART/HSTOP/VSTART/VSTOP) and changes its
-  colour on every VERA frame.
+  colour on every VERA frame until a key is pressed.
 
 ## Build and run
 

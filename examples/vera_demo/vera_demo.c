@@ -3,7 +3,8 @@
  * Booted by sdk/boot.s, no DOS: finds the A2VERA card in any slot, sets
  * layer 0 to an 8 bpp bitmap at VRAM $00000 (320 x 240 = 76,800 bytes,
  * through DATA0 with increment 1), shows it scaled 2x, then cycles the
- * border colour on every VERA frame.  main never returns.
+ * border colour on every VERA frame until a key is pressed.  main never
+ * returns.
  */
 
 #include <conio.h>
@@ -57,10 +58,15 @@ int main(void)
     VERA_DC_VIDEO = 0x11;               /* VGA + layer 0 */
     cputs(" done\r\n");
     cputs("The border colour changes every frame.\r\n");
+    cputs("Press a key to stop.\r\n");
 
-    for (c = 0;; ++c) {
+    for (c = 0; !kbhit(); ++c) {
         vera_wait_vsync();
         VERA_CTRL      = 0;
         VERA_DC_BORDER = c;
     }
+    cgetc();
+    cputs("Test ended.\r\n");
+    for (;;)
+        ;
 }

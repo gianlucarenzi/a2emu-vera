@@ -15,18 +15,28 @@ unsigned char vera_detect(void)
         /* only reads here: a disk controller's firmware is left alone */
         if (p[1] == 0x20 && p[3] == 0x00 && p[5] == 0x03)
             continue;
+        /* an empty slot reads the floating bus, which can show anything once:
+           CTRL must read back what was written, the identity twice */
         p[5] = 0x7E;                    /* CTRL: DCSEL 63 */
+        if (p[5] != 0x7E)
+            continue;
         v = p[9];
         m = p[10];
         p[5] = 0x00;
-        if (v == 'V' && m >= 47) {
-            vera = p;
-            vera_slot = s;
-            VERA_ADDR_L = 0;
-            VERA_ADDR_M = 0;
-            VERA_ADDR_H = 0;
-            return s;
+        if (p[5] != 0x00 || v != 'V' || m < 47)
+            continue;
+        p[5] = 0x7E;
+        if (p[9] != v || p[10] != m || p[5] != 0x7E) {
+            p[5] = 0x00;
+            continue;
         }
+        p[5] = 0x00;
+        vera = p;
+        vera_slot = s;
+        VERA_ADDR_L = 0;
+        VERA_ADDR_M = 0;
+        VERA_ADDR_H = 0;
+        return s;
     }
     return 0;
 }
