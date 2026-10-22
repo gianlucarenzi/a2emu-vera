@@ -2,3 +2,4 @@
 examples/*/*.o
 examples/*/*.bin
 examples/*/*.dsk
+examples/*/*.map

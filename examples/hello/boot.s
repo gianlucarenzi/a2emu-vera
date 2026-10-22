@@ -15,7 +15,9 @@ SECTOR  := $3D          ; PROM: physical sector wanted
 TRACK   := $41          ; PROM: track expected in the address field
 BASHIMEM:= $73          ; Applesoft HIMEM
 WAIT    := $FCA8        ; monitor delay
-HIMEM   = $9600         ; = __HIMEM__ in apple2-boot.cfg
+.ifndef HIMEM
+HIMEM   = $9600         ; = __HIMEM__ in apple2-boot.cfg (--asm-define HIMEM=... to change)
+.endif
 
         .byte   1               ; the PROM loads just this sector, then JMP $0801
 
