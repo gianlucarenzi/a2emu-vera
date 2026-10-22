@@ -17,6 +17,10 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   firmware enables its own 80-column code at $C3xx only if it finds aux memory; otherwise it leaves
   the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
   `a2run` takes `--aux 64` for the same.
+- **VERA slot selection**: The A2VERA card can be placed in any peripheral slot (1-7) via `A2_VERA_SLOT=<n>` (default: 4). 
+  Slot 7 is reserved for the hard disk device if present; specifying `A2_VERA_SLOT=7` still works but is not 
+  recommended. The emulator prints the selected slot and address range on startup.
+  Example: `A2_VERA_SLOT=5 ./a2emu disk.po` places VERA at $C500-$C51F; `A2_VERA_SLOT=1 ./a2emu` at $C100-$C11F.
 - `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run`/`a2fs` in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them but keeps the installed `rom/`.
 - Keys: F9 warp, F10 pause, F11 reset, F12 help.
 - SD card: `A2_SDCARD=sd.img` (or `a2run --sdcard sd.img`) puts a raw image of 512-byte sectors (at least 512 KB) on the VERA's SPI port as an SDHC card in SPI mode (CMD0/1/8/9/10/12/13/16/17/18/24/25/55/58/59, ACMD13/23/41/51; written through).  The SPI follows VERA 48.0.1's `spictrl.v` clock by clock: a byte takes 16 VERA clocks, 512 with SLOW.

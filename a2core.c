@@ -132,7 +132,24 @@ void vera_bus_init(void)
           g_cyareg = 0x80; g_a2_speed_permille = g_gs_fast_permille;
       } }
     { const char *e = getenv("A2_VERA_IRQ"); g_vera_irq = e ? atoi(e) : 1;
-      e = getenv("A2_VERA_SLOT"); if (e && atoi(e) >= 1 && atoi(e) <= 7) g_vera_base = 0xC000 + atoi(e) * 0x100; }
+      e = getenv("A2_VERA_SLOT");
+      if (e && atoi(e) >= 1 && atoi(e) <= 7) {
+          int slot = atoi(e);
+          g_vera_base = 0xC000 + slot * 0x100;
+      } else {
+          /* Auto-detect: use slot 4 by default, but check for conflicts.
+             Slot 7 is used by the hard disk device. */
+          int slot = 4;  /* default slot */
+          if (g_hd_present && slot == 7) {
+              fprintf(stderr, "a2emu: slot 7 is occupied by hard disk device, using slot 4 for VERA\n");
+              slot = 4;
+          }
+          g_vera_base = 0xC000 + slot * 0x100;
+      }
+      /* Notify the user of the slot assignment */
+      fprintf(stderr, "a2emu: VERA card in slot %d ($%04X)\n", 
+              (g_vera_base - 0xC000) / 0x100, g_vera_base);
+    }
     vc_init(&g_vera);
     { const char *e = getenv("A2_SDCARD");                                       // SD card on the VERA's SPI
       if (e && *e && !sdcard_attach(e)) fprintf(stderr, "a2emu: cannot use SD card image %s\n", e); }
