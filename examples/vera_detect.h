@@ -28,41 +28,48 @@ static uint16_t g_vera_base = 0;
  * Returns slot number (1-7) if found, or 0 if not found.
  * Also sets g_vera_base to the I/O base address.
  *
- * Note: If a different controller (e.g., hard disk) occupies a slot,
- * the ADDR_L test will fail naturally because those controllers don't
- * have a register at offset 0 that echoes write values.
+ * Detection method: VERA's ADDR_L register at offset 0 in the slot will
+ * echo whatever value is written to it. We test by:
+ * 1. Write 0xA5, read back to verify
+ * 2. Write 0x5A (inverse pattern), read back to verify
+ * This two-pattern test avoids false positives from uninitialized or
+ * zero-filled memory, and detects controllers that always return the same value.
+ *
+ * If a different controller (e.g., hard disk) occupies a slot, the test
+ * will fail because those controllers don't have a writable register at
+ * offset 0 that echoes input values.
  */
 static int vera_detect(void)
 {
     int slot;
     volatile uint8_t *addr_l;
     uint8_t test_val, read_val;
-    int retries;
 
     /* Try each slot from 1 to 7 */
     for (slot = 1; slot <= 7; slot++) {
         uint16_t base = 0xC000 + (slot << 8);
         addr_l = (volatile uint8_t *)(base + 0);  /* ADDR_L at offset 0 */
 
-        /* Test: write a test pattern and read it back multiple times.
-         * ADDR_L is a write/read register that holds the low byte of the address pointer.
-         * We test with a distinctive pattern and verify consistency. */
+        /* Test 1: Write 0xA5 and verify it echoes back */
         test_val = 0xA5;  /* Pattern: 10100101 */
+        *addr_l = test_val;
+        read_val = *addr_l;
 
-        for (retries = 0; retries < 2; retries++) {
-            *addr_l = test_val;
-            read_val = *addr_l;
+        if (read_val != test_val) {
+            continue;  /* Not VERA in this slot */
+        }
 
-            if (read_val == test_val) {
-                /* Write another test pattern to confirm it's VERA, not stale data */
-                uint8_t test_val2 = 0x5A;  /* Inverse pattern: 01011010 */
-                *addr_l = test_val2;
-                if (*addr_l == test_val2) {
-                    /* Confirmed: this is the VERA ADDR_L register */
-                    g_vera_base = base;
-                    return slot;
-                }
-            }
+        /* Test 2: Write 0x5A (inverse) and verify it echoes back.
+         * This confirms the register is truly writable and not returning
+         * a stale/cached value from the first write. */
+        test_val = 0x5A;  /* Pattern: 01011010 (inverse) */
+        *addr_l = test_val;
+        read_val = *addr_l;
+
+        if (read_val == test_val) {
+            /* Confirmed: this is the VERA ADDR_L register */
+            g_vera_base = base;
+            return slot;
         }
     }
 
