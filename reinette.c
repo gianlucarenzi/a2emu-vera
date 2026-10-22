@@ -422,6 +422,9 @@ int main(int argc, char *argv[]) {
 			PB2 = shift ? 0xFF : 0x00;                                                // update push button 2
 
 			if (event.type == SDL_QUIT) running = false;                              // WM sent TERM signal
+			if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE)
+				running = false;                                                        // X on either window: with two windows
+			                                                                          // SDL_QUIT never comes (only on the last one)
 
 			// if (event.type == SDL_WINDOWEVENT) {                                      // pause if the window loses focus
 			//   if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
