@@ -2,11 +2,14 @@
 # a2emu-vera-windows: place the a2emu windows with the window manager (wmctrl),
 # never overlapping: Apple II (Reinette) TOP-LEFT, VERA BOTTOM-RIGHT of a display.
 #
-# Usage: a2emu-vera-windows [--pid PID] [--left] [--timeout SECONDS]
-#   --pid      only the windows of this a2emu process (default: any a2emu window)
+# Usage: a2emu-vera-windows [--pid PID] [--left] [--timeout SECONDS] [--print]
+#                           [--main TITLE] [--vera TITLE]
+#   --pid      only the windows of this process (default: any matching window)
 #   --left     the display at x = 0 instead of the primary one
 #   --timeout  how long to wait for both windows (default 10 s)
 #   --print    only print where the windows would go
+#   --main, --vera  title substrings (default "Reinette", "VERA (a2_vera)"), so
+#              other emulators work too, e.g. --main VICE --vera VERA
 #
 # Nothing is fixed: the displays come from xrandr (primary, else the first one),
 # the panels from each dock's _NET_WM_STRUT_PARTIAL (only those on that display),
@@ -14,16 +17,20 @@
 # wmctrl, xrandr, xprop and xwininfo.
 
 PID=
+MAIN="Reinette"
+VTITLE="VERA (a2_vera)"
 PRINT=0
 LEFT=0
 TIMEOUT=10
 while [ $# -gt 0 ]; do
     case $1 in
         --pid) shift; PID=$1 ;;
+        --main) shift; MAIN=$1 ;;
+        --vera) shift; VTITLE=$1 ;;
         --left) LEFT=1 ;;
         --print) PRINT=1 ;;
         --timeout) shift; TIMEOUT=$1 ;;
-        --help|-h) sed -n "2,14p" "$0"; exit 0 ;;
+        --help|-h) sed -n "2,17p" "$0"; exit 0 ;;
     esac
     shift
 done
@@ -59,20 +66,20 @@ for w in $(xprop -root _NET_CLIENT_LIST | sed 's/.*# //; s/,//g'); do
     [ "$sr" -gt 0 ] && [ "$ry1" -ge "$DY" ] && [ "$ry0" -lt "$((DY + DH))" ] && [ $((RW - sr)) -lt "$R" ] && R=$((RW - sr))
 done
 
-# wait for an a2emu window whose title contains $1, print its id
+# wait for a window whose title contains $1 and not $2, print its id
 wait_win() {
     local i id
     for i in $(seq $((TIMEOUT * 10))); do
-        id=$(wmctrl -lp | awk -v t="$1" -v p="$PID" \
-            'index($0, t) && (p == "" || $3 == p) { print $1; exit }')
+        id=$(wmctrl -lp | awk -v t="$1" -v x="$2" -v p="$PID" \
+            'index($0, t) && !(x != "" && index($0, x)) && (p == "" || $3 == p) { print $1; exit }')
         [ -n "$id" ] && { echo "$id"; return 0; }
         sleep 0.1
     done
     return 1
 }
 
-A2=$(wait_win "Reinette") || { echo "a2emu-vera-windows: no Apple II window" >&2; exit 1; }
-VERA=$(wait_win "VERA (a2_vera)") || { echo "a2emu-vera-windows: no VERA window" >&2; exit 1; }
+A2=$(wait_win "$MAIN" "$VTITLE") || { echo "a2emu-vera-windows: no \"$MAIN\" window" >&2; exit 1; }
+VERA=$(wait_win "$VTITLE") || { echo "a2emu-vera-windows: no VERA window" >&2; exit 1; }
 
 # frame extents l r t b and client size of a window
 frame() { xprop -id "$1" _NET_FRAME_EXTENTS 2>/dev/null | sed -n 's/.*= //p' | tr -d ,; }
