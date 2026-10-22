@@ -26,14 +26,15 @@ void puce6502GetState(Puce6502State*);
 #include <math.h>
 
 #include "veracore.h"
+#include "sdcard.h"
 
 /* ================================================================
  * Build configuration
  * ================================================================ */
 
-#define VC_VERSION_MAJOR  47
+#define VC_VERSION_MAJOR  48            /* VERA 48.0.1, the HDL this core follows */
 #define VC_VERSION_MINOR  0
-#define VC_VERSION_PATCH  2
+#define VC_VERSION_PATCH  1
 
 /* VRAM address ranges */
 #define ADDR_VRAM_START     0x00000
@@ -303,29 +304,25 @@ void vc_audio_render(int16_t *buf, int num_samples)
             if (pcm_phase >= 128) {
                 pcm_phase -= 128;
                 if (pcm_fifo_cnt > 0) {
-                    if (pcm_ctrl & 0x10) {
-                        /* Stereo */
-                        int8_t sl = (int8_t)pcm_read_fifo();
-                        int8_t sr = (pcm_fifo_cnt > 0) ? (int8_t)pcm_read_fifo() : sl;
-                        if (pcm_ctrl & 0x20) {
-                            /* 16-bit */
-                            int16_t sl16 = (sl << 8) | ((pcm_fifo_cnt > 0) ? pcm_read_fifo() : 0);
-                            int16_t sr16 = (sr << 8) | ((pcm_fifo_cnt > 0) ? pcm_read_fifo() : 0);
-                            pcm_cur_l = sl16;
-                            pcm_cur_r = sr16;
+                    /* FIFO byte order (HDL audio/pcm.v): left low, left high (16-bit),
+                       then right low, right high (stereo).  A partial sample left in
+                       the FIFO is dropped, as x16emu does. */
+                    unsigned need = ((pcm_ctrl & 0x20) ? 2 : 1) * ((pcm_ctrl & 0x10) ? 2 : 1);
+                    if (pcm_fifo_cnt < need) {
+                        pcm_fifo_cnt = 0;
+                        pcm_fifo_rdidx = pcm_fifo_wridx;
+                    } else if (pcm_ctrl & 0x20) {
+                        pcm_cur_l = pcm_read_fifo();
+                        pcm_cur_l |= pcm_read_fifo() << 8;
+                        if (pcm_ctrl & 0x10) {
+                            pcm_cur_r = pcm_read_fifo();
+                            pcm_cur_r |= pcm_read_fifo() << 8;
                         } else {
-                            pcm_cur_l = sl << 8;
-                            pcm_cur_r = sr << 8;
+                            pcm_cur_r = pcm_cur_l;
                         }
                     } else {
-                        /* Mono */
-                        int8_t s = (int8_t)pcm_read_fifo();
-                        if (pcm_ctrl & 0x20) {
-                            int16_t s16 = (s << 8) | ((pcm_fifo_cnt > 0) ? pcm_read_fifo() : 0);
-                            pcm_cur_l = pcm_cur_r = s16;
-                        } else {
-                            pcm_cur_l = pcm_cur_r = s << 8;
-                        }
+                        pcm_cur_l = (int16_t)(pcm_read_fifo() << 8);
+                        pcm_cur_r = (pcm_ctrl & 0x10) ? (int16_t)(pcm_read_fifo() << 8) : pcm_cur_l;
                     }
                 } else if (pcm_loop) {
                     pcm_fifo_restart();
@@ -347,37 +344,71 @@ void vc_audio_render(int16_t *buf, int num_samples)
 }
 
 /* ================================================================
- * SPI — stub (no SD card)
- * From vera_spi.c, Copyright (c) 2019 Michael Steil, 2-clause BSD
+ * SPI -- spi/spictrl.v of VERA 48.0.1, clocked by the 25 MHz VERA clock.
+ * A byte is 8 bits x 2 SCK edges: SCK toggles every clock (16 clocks per
+ * byte, 0.64 us) or, with SLOW, every 32 clocks of a free-running 5-bit
+ * divider (512 clocks, 20.48 us).  MISO is sampled on the rising edge, MOSI
+ * shifts on the falling edge, BUSY = bit counter != 0, SPI_DATA reads the
+ * receive shift register (so a read during a transfer sees the bits so far),
+ * and a transfer requested while BUSY is ignored.  The SD card (sdcard.c)
+ * answers a whole byte at the start of each transfer.
  * ================================================================ */
 
-static bool    spi_ss;
-static bool    spi_busy;
-static bool    spi_autotx;
-static uint8_t spi_sending_byte;
-static uint8_t spi_received_byte;
-static float   spi_outcounter;
+static bool    spi_select, spi_slow, spi_autotx;
+static uint8_t spi_tx, spi_rx;          /* tx_shift_r, rx_shift_r */
+static uint8_t spi_miso_byte;           /* what the card drives during this byte */
+static uint8_t spi_bitcnt;              /* bitcnt_r: busy while nonzero */
+static uint8_t spi_div;                 /* div_cnt_r */
+static bool    spi_clk;                 /* clk_r (SCK) */
+static double  spi_clk_carry;           /* fraction of a 25 MHz clock not yet run */
 
 static void vera_spi_init(void)
 {
-    spi_ss = false;
-    spi_busy = false;
-    spi_autotx = false;
-    spi_received_byte = 0xff;
+    spi_select = spi_slow = spi_autotx = false;
+    spi_tx = spi_rx = 0;
+    spi_bitcnt = spi_div = 0;
+    spi_clk = false;
+    spi_clk_carry = 0;
+    sdcard_select(0);
+}
+
+static void spi_start(uint8_t value)
+{
+    if (spi_bitcnt) return;             /* txstart is ignored while busy */
+    spi_tx = value;
+    spi_bitcnt = 8;
+    spi_miso_byte = spi_select ? sdcard_xfer(value) : 0xFF;   /* no card: MISO pulled up */
+}
+
+/* advance the SPI controller by n VERA clocks */
+static void vera_spi_step(unsigned n)
+{
+    while (n && spi_bitcnt) {
+        if (!spi_slow || spi_div == 31) {
+            if (spi_clk) {              /* falling edge: shift out, count the bit */
+                spi_tx <<= 1;
+                spi_bitcnt--;
+            } else {                    /* rising edge: sample MISO */
+                spi_rx = (uint8_t)((spi_rx << 1) | ((spi_miso_byte >> (spi_bitcnt - 1)) & 1));
+            }
+            spi_clk = !spi_clk;
+        }
+        spi_div = (spi_div + 1) & 31;
+        n--;
+    }
+    spi_div = (spi_div + n) & 31;       /* idle: only the divider runs */
 }
 
 static uint8_t vera_spi_read(uint8_t reg)
 {
     switch (reg) {
-        case 0:
-            if (spi_autotx && spi_ss && !spi_busy) {
-                spi_sending_byte = 0xff;
-                spi_busy = true;
-                spi_outcounter = 0;
-            }
-            return spi_received_byte;
+        case 0: {
+            uint8_t v = spi_rx;
+            if (spi_autotx) spi_start(0xFF);
+            return v;
+        }
         case 1:
-            return (spi_busy << 7) | (spi_autotx << 2) | spi_ss;
+            return (spi_bitcnt ? 0x80 : 0) | (spi_autotx << 2) | (spi_slow << 1) | spi_select;
     }
     return 0;
 }
@@ -386,18 +417,15 @@ static void vera_spi_write(uint8_t reg, uint8_t value)
 {
     switch (reg) {
         case 0:
-            if (spi_ss && !spi_busy) {
-                spi_sending_byte = value;
-                spi_busy = true;
-                spi_outcounter = 0;
-            }
+            spi_start(value);
             break;
         case 1:
-            if (spi_ss != (value & 1)) {
-                spi_ss = value & 1;
-                /* No sdcard_select — no SD card attached */
-            }
             spi_autotx = !!(value & 4);
+            spi_slow   = !!(value & 2);
+            if (spi_select != (value & 1)) {
+                spi_select = value & 1;
+                sdcard_select(spi_select);
+            }
             break;
     }
 }
@@ -781,20 +809,6 @@ fx_video_space_write(uint32_t address, bool nibble, uint8_t value)
     } else {
         if (!fx_trans_writes || value > 0)
             video_ram[address & 0x1FFFF] = value;
-    }
-    /* Log tilemap writes (char+attr pairs in first 16KB) */
-    if ((address & 0x1FFFF) < 0x4000) {
-        static FILE *tilelog = NULL;
-        static int tcount = 0;
-        if (!tilelog) tilelog = fopen("/tmp/vera_tile.txt", "w");
-        if (tilelog && tcount < 50000) {
-            int row = (address & 0x1FFFF) / 256;
-            int col = ((address & 0x1FFFF) % 256) / 2;
-            int is_attr = (address & 1);
-            fprintf(tilelog, "[%02d,%02d] %s=0x%02X addr=%05X\n", row, col, is_attr ? "ATR" : "CHR", value, address & 0x1FFFF);
-            tcount++;
-            fflush(tilelog);
-        }
     }
     if (address >= ADDR_PSG_START && address < ADDR_PSG_END) {
         psg_writereg(address & 0x3f, value);
@@ -1795,22 +1809,6 @@ video_write_reg(uint8_t reg, uint8_t value)
                  counted too. */
               { extern unsigned long vc_wr_nz[16];
                 if (value) vc_wr_nz[wa >> 13]++; } }
-            /* Log DATA0/DATA1 writes to tilemap area */
-            {
-                int sel = reg - 3;
-                uint32_t a = io_addr[sel] & 0x1FFFF;
-                if (a < 0x4000) {
-                    static FILE *dlog = NULL;
-                    static int dc = 0;
-                    if (!dlog) dlog = fopen("/tmp/vera_data.txt", "w");
-                    if (dlog && dc < 100000) {
-                        fprintf(dlog, "DATA%d addr=%05X val=%02X '%c' inc=%d\n",
-                            sel, a, value, (value >= 0x20 && value < 0x7F) ? value : '.', increments[io_inc[sel]]);
-                        dc++;
-                        fflush(dlog);
-                    }
-                }
-            }
             if (fx_2bit_poking && fx_addr1_mode) {
                 fx_2bit_poking = false;
                 uint8_t mask = value >> 6;
@@ -2126,6 +2124,12 @@ int vc_tick(vc_t *v, int cycles)
         float whole  = (float)(int)scaled;
         vc_speed_carry = scaled - whole;
         vcyc = whole;
+    }
+    {   /* the SPI runs on whole 25 MHz VERA clocks */
+        double clocks = vcyc * PIXEL_FREQ / CPU_MHZ + spi_clk_carry;
+        unsigned whole = (unsigned)clocks;
+        spi_clk_carry = clocks - whole;
+        vera_spi_step(whole);
     }
     bool new_frame = video_step_internal(vcyc);
 

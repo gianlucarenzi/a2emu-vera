@@ -4,3 +4,4 @@ examples/*/*.bin
 examples/*/*.dsk
 examples/*/*.map
 /sdk/boot.sector
+examples/*/*.img
