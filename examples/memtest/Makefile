@@ -12,9 +12,9 @@ A2RUN   ?= a2run
 
 all: memtest.dsk
 
-memtest.bin: memtest.c $(VERA)/vera.c $(VERA)/vera.h $(SDK)/a2emu-vera.cfg
+memtest.bin: memtest.c $(VERA)/vera.c $(VERA)/vera.h $(VERA)/vera_io.s $(SDK)/a2emu-vera.cfg
 	$(CL65) -t apple2 -C $(SDK)/a2emu-vera.cfg -Osir -Cl -I $(VERA) \
-	  -o $@ memtest.c $(VERA)/vera.c
+	  -o $@ memtest.c $(VERA)/vera.c $(VERA)/vera_io.s
 
 $(SDK)/boot.sector: $(SDK)/boot.s
 	$(MAKE) -C ../.. sdk/boot.sector

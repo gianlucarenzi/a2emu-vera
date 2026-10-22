@@ -50,7 +50,7 @@ int main(void)
             c = (unsigned char)(x + y);
             if (y == 0 || y == H - 1 || x == 0 || x == W - 1)
                 c = 1;
-            VERA_DATA0 = c;
+            vera_w0(c);
         }
         if ((y & 15) == 0)
             cputc('.');

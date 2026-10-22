@@ -62,8 +62,8 @@ static void fill_gradient(void)
         for (col = 0; col < MAP_COLS; col++)
         {
             colour = (row + col) & 0x0F;         /* 0–15 diagonal     */
-            VERA_DATA0 = 0x20;                   /* space character   */
-            VERA_DATA0 = (colour << 4) | colour; /* bg == fg          */
+            vera_w0(0x20);                   /* space character   */
+            vera_w0((colour << 4) | colour); /* bg == fg          */
         }
     }
 

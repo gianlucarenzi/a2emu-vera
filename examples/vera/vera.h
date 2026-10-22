@@ -5,6 +5,16 @@
  *
  *     if (!vera_detect()) ... no card
  *     VERA_CTRL = 0;  VERA_DC_VIDEO = 0x11;  ...
+ *     vera_w0(c);                      DATA0 = c
+ *
+ * Writes through `vera` are STA (zp),Y: on the NMOS 6502 (][+, unenhanced IIe)
+ * they read the register one cycle before writing it.  That is harmless for
+ * most registers, not for those whose reads have side effects: DATA0/DATA1
+ * (the read steps ADDR, or fills the FX cache), SPI_DATA (auto-tx) and, with
+ * DCSEL 6, $09-$0C (FX cache / accumulator).  Write those with vera_w0(),
+ * vera_w1(), VERA_POKE() (vera_io.s: STA absolute, no dummy read); VERA_DATA0,
+ * VERA_DATA1 and VERA_SPI_DATA are read-only here so that a plain store does
+ * not compile.
  *
  * Register layout as in the VERA 48.0.1 HDL (DCSEL = CTRL bits 6:1). */
 
@@ -17,12 +27,13 @@ extern volatile unsigned char *vera;
 extern unsigned char vera_slot;
 
 #define VERA_REG(o)     (vera[o])
+#define VERA_RO(o)      (((volatile const unsigned char *)vera)[o])
 
 #define VERA_ADDR_L     VERA_REG(0x00)
 #define VERA_ADDR_M     VERA_REG(0x01)
 #define VERA_ADDR_H     VERA_REG(0x02)  /* bits 7:3 increment, bit 0 VRAM bit 16 */
-#define VERA_DATA0      VERA_REG(0x03)
-#define VERA_DATA1      VERA_REG(0x04)
+#define VERA_DATA0      VERA_RO(0x03)   /* write: vera_w0() */
+#define VERA_DATA1      VERA_RO(0x04)   /* write: vera_w1() */
 #define VERA_CTRL       VERA_REG(0x05)  /* bit 0 ADDRSEL, bits 6:1 DCSEL */
 #define VERA_IEN        VERA_REG(0x06)
 #define VERA_ISR        VERA_REG(0x07)  /* write 1s to clear VSYNC/LINE/SPRCOL */
@@ -56,7 +67,7 @@ extern unsigned char vera_slot;
 #define VERA_AUDIO_CTRL VERA_REG(0x1B)
 #define VERA_AUDIO_RATE VERA_REG(0x1C)
 #define VERA_AUDIO_DATA VERA_REG(0x1D)
-#define VERA_SPI_DATA   VERA_REG(0x1E)
+#define VERA_SPI_DATA   VERA_RO(0x1E)   /* write: VERA_POKE(0x1E, v) */
 #define VERA_SPI_CTRL   VERA_REG(0x1F)
 
 #define VERA_ISR_VSYNC  0x01
@@ -79,6 +90,13 @@ extern unsigned char vera_slot;
         VERA_ADDR_M = (unsigned char)((addr) >> 8); \
         VERA_ADDR_H = (unsigned char)((inc) | (((addr) >> 16) & 1)); \
     } while (0)
+
+/* Stores without a dummy read (vera_io.s): DATA0, DATA1, any register. */
+void __fastcall__ vera_w0(unsigned char v);
+void __fastcall__ vera_w1(unsigned char v);
+void __fastcall__ vera_poke(unsigned int reg_val);
+#define VERA_POKE(reg, v) vera_poke(((unsigned int)(reg) << 8) | (unsigned char)(v))
+void __fastcall__ vera_io_init(unsigned char page);
 
 /* Find the card: for slots 1-7, skip the ones with disk-controller firmware
  * ($Cn01/$Cn03/$Cn05 = $20/$00/$03: Disk II, ProDOS block devices), select

@@ -26,8 +26,8 @@ static void __fastcall__ clear_row(unsigned char r)
 
     set_cell(0, r);
     for (x = 0; x < VT_COLS; ++x) {
-        VERA_DATA0 = 0x20;
-        VERA_DATA0 = VT_COLOR;
+        vera_w0(0x20);
+        vera_w0(VT_COLOR);
     }
 }
 
@@ -77,7 +77,7 @@ void vt_init(void)
 
     VERA_SET_ADDR(VT_FONT, VERA_INC1);
     for (i = 0; i < 128u * VT_TILE_HEIGHT; ++i)
-        VERA_DATA0 = vt_font[i];
+        vera_w0(vt_font[i]);
 
     vt_clear();
 }
@@ -98,8 +98,8 @@ static void newline(void)
 void __fastcall__ vt_glyph(unsigned char g)
 {
     set_cell(cur_x, (unsigned char)(vt_top + cur_y));
-    VERA_DATA0 = g & 0x7F;
-    VERA_DATA0 = (g & 0x80) ? (unsigned char)((VT_COLOR << 4) | (VT_COLOR >> 4)) : VT_COLOR;
+    vera_w0(g & 0x7F);
+    vera_w0((g & 0x80) ? (unsigned char)((VT_COLOR << 4) | (VT_COLOR >> 4)) : VT_COLOR);
     if (++cur_x >= VT_COLS)
         newline();
 }

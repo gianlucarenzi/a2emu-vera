@@ -58,7 +58,8 @@ static unsigned char aux_present(void)
 
 int main(void)
 {
-    register volatile unsigned char *data0, *border;
+    register volatile unsigned char *border;
+    register volatile const unsigned char *data0;
     unsigned char p, i, k, aux, bad_vreg = 0;
     unsigned int h, bad_aux = 0, bad_vram = 0;
 
@@ -104,9 +105,9 @@ int main(void)
         k = PATTERN(h >> 8, h, 0);
         i = 0;
         if (h < VRAM_PAGES)
-            do { *border = *data0 = k ^ i; } while (++i);
+            do { vera_w0(*border = k ^ i); } while (++i);
         else
-            for (; i < VRAM_TAIL; ++i) *border = *data0 = k ^ i;
+            for (; i < VRAM_TAIL; ++i) vera_w0(*border = k ^ i);
     }
     VERA_SET_ADDR(0x00000ul, VERA_INC1);
     for (h = 0; h <= VRAM_PAGES; ++h) {

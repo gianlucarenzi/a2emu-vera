@@ -13,10 +13,10 @@ A2RUN   ?= a2run
 
 all: test_scrolling.dsk
 
-test_scrolling.bin: test_scrolling.c $(VERA)/vera.c $(VERA)/vera.h $(VERA)/vtext.c $(VERA)/vtext.h $(VERA)/vtfont.s $(SDK)/a2emu-vera.cfg
+test_scrolling.bin: test_scrolling.c $(VERA)/vera.c $(VERA)/vera.h $(VERA)/vera_io.s $(VERA)/vtext.c $(VERA)/vtext.h $(VERA)/vtfont.s $(SDK)/a2emu-vera.cfg
 	$(CL65) -t apple2 -C $(SDK)/a2emu-vera.cfg -Osir -Cl -I $(VERA) -DVT_MODE=$(VT_MODE) \
 	  --asm-define VT_MODE=$(VT_MODE) --bin-include-dir $(VERA) \
-	  -o $@ test_scrolling.c $(VERA)/vera.c $(VERA)/vtext.c $(VERA)/vtfont.s
+	  -o $@ test_scrolling.c $(VERA)/vera.c $(VERA)/vera_io.s $(VERA)/vtext.c $(VERA)/vtfont.s
 
 $(SDK)/boot.sector: $(SDK)/boot.s
 	$(MAKE) -C ../.. sdk/boot.sector

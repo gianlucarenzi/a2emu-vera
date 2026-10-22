@@ -33,6 +33,7 @@ unsigned char vera_detect(void)
         p[5] = 0x00;
         vera = p;
         vera_slot = s;
+        vera_io_init((unsigned char)(0xC0 + s));
         VERA_ADDR_L = 0;
         VERA_ADDR_M = 0;
         VERA_ADDR_H = 0;
