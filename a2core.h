@@ -103,6 +103,7 @@ extern int  g_memslow;
 extern bool S80STORE, RAMRD, RAMWRT, ALTZP, INTCXROM, SLOTC3ROM, S80COL, ALTCHAR;
 int  a2_load_iie_roms(const char *dir, int enhanced);   // 1 = loaded, IIe mode on
 int  a2_load_iie_video_rom(const char *dir, int enhanced, uint8_t *buf);   // 2 KB charset, 1 = loaded
+const uint8_t *a2_aux_ram(void);            // aux 64 KB, NULL without the extended 80-column card
 void a2_reset(void);                        // machine reset (IIe: switches + LC to ROM)
 
 // frontend hooks (NULL = not provided)

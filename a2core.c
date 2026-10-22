@@ -182,7 +182,7 @@ bool LCWFF = false;                                                             
  * there is no aux RAM: aux reads return $FF, aux writes are lost, ALTZP does nothing
  * (on a real machine it would map in floating bus) -- so aux-detection code (ProDOS's
  * /RAM) correctly finds none.
- * Not modelled: 80-column / double-res VIDEO (the frontend draws 40 columns),
+ * Not modelled: double-res VIDEO (the frontend draws 40/80-column TEXT only),
  * snapshots of the IIe state, the IIe keyboard's auto-repeat. */
 int      g_iie = 0;
 int      g_iie_aux = 0;                /* 1 = extended 80-column card (aux 64 KB) fitted */
@@ -204,6 +204,7 @@ static inline uint8_t *iie_bank(uint16_t a, int write) {
 	if (a < 0x0200) return &ram[a];
 	return (write ? RAMWRT : RAMRD) ? aux_at(a, write) : &ram[a];
 }
+const uint8_t *a2_aux_ram(void) { return g_iie_aux ? aux : NULL; }   /* for 80-column video */
 static void iie_update_memslow(void) { g_memslow = g_iie && (RAMRD || RAMWRT || S80STORE); }
 
 static void swapbuf(uint8_t *a, uint8_t *b, size_t n) {
