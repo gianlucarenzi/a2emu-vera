@@ -4,6 +4,12 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 
 - `make` builds `a2emu` (SDL2 window + audio) and `a2run` (headless test runner); `make windows` builds `a2emu.exe`.
 - Put the Apple ROMs in `rom/` (`appleII+.rom`, `diskII.rom`, IIe 342-0135/0134 or 342-0303/0304, IIe video ROM 342-0133 or 342-0265 for lowercase/80 columns); they are not included.
+- ROM source: the images used during development came from the Asimov archive mirror,
+  <https://mirrors.apple2.org.za/ftp.apple.asimov.net/emulators/rom_images/>
+  (`apple_ii+_rom.zip`, `Apple Disk II 16 Sector Interface Card ROM P5 - 341-0027.bin`, and the
+  IIe CPU and video ROMs from `APPLE Computer and Peripheral Card Roms Collection.zip`).
+  **The Apple ROMs are copyrighted by Apple: downloading them is not legal unless you actually own
+  the original hardware.** If you do, dumping the chips of your own machine is the clean way to get them.
 - Run: `A2_MODEL=iie ./a2emu disk.po` (from this directory); `iiee` = enhanced IIe, `A2_AUX=64` adds the extended 80-column card.
 - `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run` launchers in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them.
 - Keys: F9 warp, F10 pause, F11 reset, F12 help.
