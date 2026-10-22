@@ -1237,18 +1237,27 @@ void a2_reset(void) {
  * (enhanced: 342-0304 = $C000-$DFFF, 342-0303 = $E000-$FFFF; unenhanced: 342-0135 +
  * 342-0134).  Returns 1 and switches the machine to IIe mode (AKD keyboard on). */
 #include <dirent.h>
-static int read_part(const char *dir, const char *part, uint8_t *buf) {
+static int read_part_n(const char *dir, const char *part, uint8_t *buf, size_t n) {
 	DIR *d = opendir(dir); struct dirent *e; int ok = 0;
 	if (!d) return 0;
 	while ((e = readdir(d))) {
 		if (!strstr(e->d_name, part)) continue;
 		char p[1200]; snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
 		FILE *f = fopen(p, "rb");
-		if (f) { ok = fread(buf, 1, 0x2000, f) == 0x2000; fclose(f); }
+		if (f) { ok = fread(buf, 1, n, f) == n; fclose(f); }
 		if (ok) break;
 	}
 	closedir(d);
 	return ok;
+}
+static int read_part(const char *dir, const char *part, uint8_t *buf) {
+	return read_part_n(dir, part, buf, 0x2000);
+}
+/* IIe video ROM (character generator): enhanced 342-0265 (with MouseText),
+ * unenhanced 342-0133.  The first 2 KB are 256 glyphs x 8 rows, bit 0 = leftmost
+ * dot, bit CLEAR = lit (the video circuit inverts), inverse glyphs stored as such. */
+int a2_load_iie_video_rom(const char *dir, int enhanced, uint8_t *buf) {
+	return read_part_n(dir, enhanced ? "342-0265" : "342-0133", buf, 0x800);
 }
 int a2_load_iie_roms(const char *dir, int enhanced) {
 	static uint8_t cd[0x2000], ef[0x2000];

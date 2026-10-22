@@ -299,6 +299,8 @@ int main(int argc, char *argv[]) {
 	SDL_Texture *revCharTexture = SDL_CreateTextureFromSurface(rdr, tmpSurface);
 	SDL_FreeSurface(tmpSurface);
 
+	SDL_Texture *iieCharTexture = NULL;                                           // IIe video ROM glyphs (all 256)
+
 
 	//================================================================== LOAD ROMS
 
@@ -342,6 +344,20 @@ int main(int argc, char *argv[]) {
 		if (!strcmp(model, "iiee")) g_cpu = 2;                                    // 65C02
 		{ const char *ax = getenv("A2_AUX"); g_iie_aux = ax && atoi(ax) >= 64; }  // A2_AUX=64: extended 80-col card
 		SDL_SetWindowTitle(wdo, !strcmp(model, "iiee") ? "Reinette //e (enhanced)" : "Reinette //e");
+
+		/* the IIe character generator: lowercase, inverse and (enhanced) MouseText.
+		   Without it TEXT falls back to the ][+ font from assets/ (uppercase only). */
+		uint8_t vrom[0x800];
+		if (a2_load_iie_video_rom(romdir, !strcmp(model, "iiee"), vrom)) {
+			SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, 7 * 256, 8, 32, SDL_PIXELFORMAT_ARGB8888);
+			for (int c = 0; c < 256; c++)
+				for (int y = 0; y < 8; y++)
+					for (int x = 0; x < 7; x++)
+						((uint32_t *)((uint8_t *)s->pixels + y * s->pitch))[c * 7 + x] =
+							(vrom[c * 8 + y] >> x) & 1 ? 0xFF000000 : 0xFFFFFFFF;
+			iieCharTexture = SDL_CreateTextureFromSurface(rdr, s);
+			SDL_FreeSurface(s);
+		}
 	  } }
 
 	if (argc > 1) {                                                               // floppy, or a hard-disk image
@@ -741,6 +757,18 @@ int main(int argc, char *argv[]) {
 					if (glyph > 0x7F) glyphAttr = A_NORMAL;                               // is NORMAL ?
 					else if (glyph < 0x40) glyphAttr = A_INVERSE;                         // is INVERSE ?
 					else glyphAttr = A_FLASH;                                             // it's FLASH !
+
+					if (iieCharTexture) {                                                 // IIe: glyphs straight from the video ROM
+						int key = glyph | (ALTCHAR << 8);
+						bool flash = !ALTCHAR && glyph >= 0x40 && glyph < 0x80;           // primary set: $40-$7F flash
+						if (flash || TextCache[line][col] != key || !flashCycle) {
+							TextCache[line][col] = key;
+							if (flash) glyph = flashCycle < 15 ? (glyph & 0x3F) | 0x80 : glyph & 0x3F;
+							SDL_Rect src = { glyph * 7, 0, 7, 8 };
+							SDL_RenderCopy(rdr, iieCharTexture, &src, &dstRect);
+						}
+						continue;
+					}
 
 					if (glyphAttr==A_FLASH || TextCache[line][col]!=glyph || !flashCycle){
 						TextCache[line][col] = glyph;
