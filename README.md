@@ -45,7 +45,8 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 - `examples/vera`: cc65 helpers for the card (`vera.h` registers, `vera_detect()`, `vera_wait_vsync()`,
   `vera_w0()`/`vera_w1()`/`VERA_POKE()` for the registers with read side effects -- a store through a
   pointer is `STA (zp),Y`, which on the NMOS 6502 of the ][+ and unenhanced IIe reads the register
-  first -- and the `vtext` text console) used by `examples/test_font`, `test_scrolling`, `test_maze`, `test_fx` (ports of the VERA_C64 tests),
+  first -- and the `vtext` text console) used by `examples/test_font`, `test_scrolling`, `test_maze`, `test_matrix`, `test_fx`, `test_irq` (ports of the VERA_C64 tests;
+  `vera_irq.s` hooks the 6502 IRQ vector in LC RAM, `delay.s` waits in CPU cycles),
   `vera_demo` (320x240 8 bpp bitmap) and `memtest` (IIe aux RAM + VERA registers + VRAM).
 - `examples/hello` (`make run`) and `examples/fstest` (`make test`: reads two files, writes a
   third and reads it back, then checks it from the host) use the SDK from this tree.
