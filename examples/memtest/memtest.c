@@ -1,5 +1,5 @@
 /* memtest.c -- Test VERA on Apple II with aux memory.
- * Fill and verify 64 KB of aux RAM via VERA's memory window at $C100-$C1FF.
+ * Fill and verify 64 KB of aux RAM via VERA's memory window.
  * VERA provides a 16-bit address space into its 128 KB VRAM.
  *
  * The test writes patterns, reads them back, and shows results.
@@ -8,13 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
-/* Apple II memory locations */
-#define VERA_ADDR_L     0xC000   /* VERA address low byte */
-#define VERA_ADDR_M     0xC001   /* VERA address mid byte */
-#define VERA_ADDR_H     0xC002   /* VERA address high byte (usually 0) */
-#define VERA_DATA0      0xC003   /* VERA data port */
-#define VERA_CTRL       0xC005   /* VERA control register */
+#include "../vera_detect.h"
 
 #define BORDER_COLOR    0xC034   /* Border color register */
 
@@ -25,12 +19,12 @@ typedef unsigned char byte;
 typedef unsigned int  word;
 
 /* Volatile pointers for memory-mapped I/O */
-static volatile byte *vera_addr_l = (volatile byte *)VERA_ADDR_L;
-static volatile byte *vera_addr_m = (volatile byte *)VERA_ADDR_M;
-static volatile byte *vera_addr_h = (volatile byte *)VERA_ADDR_H;
-static volatile byte *vera_data0  = (volatile byte *)VERA_DATA0;
-static volatile byte *vera_ctrl   = (volatile byte *)VERA_CTRL;
-static volatile byte *border      = (volatile byte *)BORDER_COLOR;
+static volatile byte *vera_addr_l;
+static volatile byte *vera_addr_m;
+static volatile byte *vera_addr_h;
+static volatile byte *vera_data0;
+static volatile byte *vera_ctrl;
+static volatile byte *border = (volatile byte *)BORDER_COLOR;
 
 /* Set VERA address to a 17-bit address (VRAM offset) */
 static void vera_set_addr(word addr)
@@ -46,8 +40,30 @@ int main(void)
 {
     word addr, errors = 0;
     byte val, expected;
+    int slot;
+    uint16_t base;
 
     printf("VERA MEMORY TEST\n");
+    printf("Detecting VERA card...");
+    fflush(stdout);
+    
+    slot = vera_detect();
+    if (slot == 0) {
+        printf(" NOT FOUND\n");
+        printf("VERA card not detected in slots 1-7\n");
+        return 1;
+    }
+    
+    base = vera_get_base();
+    printf(" found in slot %d ($%04X)\n", slot, base);
+    
+    /* Initialize volatile pointers to detected slot */
+    vera_addr_l = (volatile byte *)(base + 0);
+    vera_addr_m = (volatile byte *)(base + 1);
+    vera_addr_h = (volatile byte *)(base + 2);
+    vera_data0  = (volatile byte *)(base + 3);
+    vera_ctrl   = (volatile byte *)(base + 5);
+    
     printf("Testing 64KB of VERA VRAM\n\n");
 
     /* Test 1: Fill with pattern */

@@ -133,22 +133,26 @@ void vera_bus_init(void)
       } }
     { const char *e = getenv("A2_VERA_IRQ"); g_vera_irq = e ? atoi(e) : 1;
       e = getenv("A2_VERA_SLOT");
+      int slot = 4;  /* default slot */
       if (e && atoi(e) >= 1 && atoi(e) <= 7) {
-          int slot = atoi(e);
-          g_vera_base = 0xC000 + slot * 0x100;
+          slot = atoi(e);
+          /* Check for hard disk conflict */
+          if (g_hd_present && slot == 7) {
+              fprintf(stderr, "a2emu: warning: slot 7 requested but occupied by hard disk device\n");
+              fprintf(stderr, "a2emu: hard disk takes precedence, using slot 4 for VERA\n");
+              slot = 4;
+          }
       } else {
           /* Auto-detect: use slot 4 by default, but check for conflicts.
              Slot 7 is used by the hard disk device. */
-          int slot = 4;  /* default slot */
           if (g_hd_present && slot == 7) {
               fprintf(stderr, "a2emu: slot 7 is occupied by hard disk device, using slot 4 for VERA\n");
               slot = 4;
           }
-          g_vera_base = 0xC000 + slot * 0x100;
       }
+      g_vera_base = 0xC000 + slot * 0x100;
       /* Notify the user of the slot assignment */
-      fprintf(stderr, "a2emu: VERA card in slot %d ($%04X)\n", 
-              (g_vera_base - 0xC000) / 0x100, g_vera_base);
+      fprintf(stderr, "a2emu: VERA card in slot %d ($%04X)\n", slot, g_vera_base);
     }
     vc_init(&g_vera);
     { const char *e = getenv("A2_SDCARD");                                       // SD card on the VERA's SPI
