@@ -72,11 +72,11 @@ static void sdl_playSound(void) {
 
 
 //==================================================== VERA PSG + PCM AUDIO (E9)
-/* A second SDL device for the card: vc_audio_render at VERA's native 48,828 Hz,
-   S16 stereo (SDL converts to what the hardware takes; the OS mixes it with the
-   speaker device).  Rendered after every emulated chunk, as many samples as the
-   CPU cycles it ran (1,020,484 Hz) are worth; queued unless more than ~0.1 s is
-   already waiting (then dropped, so the sound never lags the picture). */
+/* A second SDL device for the card at VERA's native 48,828 Hz, S16 stereo (SDL
+   converts to what the hardware takes; the OS mixes it with the speaker device).
+   The VERA makes its samples as CPU time passes (vc_audio_take collects them);
+   queued unless more than ~0.1 s is already waiting (then dropped, so the sound
+   never lags the picture). */
 static SDL_AudioDeviceID veraAudio;
 
 static void vera_audio_open(void) {
@@ -113,20 +113,8 @@ static void wav_close(void) {
 	wav_out = NULL;
 }
 
-static void vera_audio_run(void) {
-	static unsigned int last;
-	static int init;
-	static unsigned long long acc;
-	static int16_t buf[2 * 4096];
-	if (!init) { last = ticks; init = 1; }
-	unsigned int d = ticks - last; last = ticks;
-	acc += (unsigned long long)d * 48828125ull;               /* samples x 1000 */
-	unsigned long long n = acc / 1020484000ull;
-	acc %= 1020484000ull;
-	if (n > 4096) n = 4096;
-	if (!n || (!veraAudio && !wav_out)) return;
-	vc_audio_render(buf, (int)n);                             /* always: PCM FIFO timing */
-	ym_mix(buf, (int)n, 48828);                               /* + the YM2151 (E14) */
+static void vera_audio_out(int16_t *buf, int n) {
+	ym_mix(buf, n, 48828);                                    /* + the YM2151 (E14) */
 	if (wav_out && !muted) {                                   /* A2_WAV (little-endian host) */
 		fwrite(buf, 4, (size_t)n, wav_out);
 		wav_n += (uint32_t)n;
@@ -136,6 +124,13 @@ static void vera_audio_run(void) {
 	   clock); only a big backlog (after warp / a pause) is dropped */
 	if (!muted && SDL_GetQueuedAudioSize(veraAudio) < 48828u * 4u / 4u)
 		SDL_QueueAudio(veraAudio, buf, (Uint32)n * 4u);
+}
+static void vera_audio_run(void) {
+	static int16_t buf[2 * 4096];
+	int n;
+	if (!veraAudio && !wav_out) return;                       /* the VERA runs its audio anyway */
+	while ((n = vc_audio_take(buf, 4096)) > 0)               /* what VERA time has produced */
+		vera_audio_out(buf, n);
 }
 
 /* audio-locked pacing: queued samples the loop aims for (~60 ms: 3.5 loops) */

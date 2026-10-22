@@ -11,7 +11,7 @@ extern "C" unsigned int ticks;             /* puce6502.c: the CPU cycle counter 
 #define YM_RATE (YM_HZ / 64.0)             /* one OPM sample per 64 clocks */
 #define RING    16384                      /* samples, ~0.3 s */
 
-int           g_ym_enabled = 1;
+int           g_ym_enabled = 0;            /* optional on the A2VERA: off unless A2_YM=1 / --ym on */
 unsigned long g_ym_writes, g_ym_busy_writes;
 
 namespace {

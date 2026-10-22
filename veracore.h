@@ -98,7 +98,8 @@ void vc_psg_write(uint8_t reg, uint8_t val);
 /* Write the VERA state in x16emu -dump V layout (132,878 B); 1 = ok. */
 int vc_dump_state(const char *path);
 
-/* Mix PSG + PCM into an interleaved stereo int16 buffer (num_samples frames). */
-void vc_audio_render(int16_t *buf, int num_samples);
+/* Take up to max_samples interleaved stereo int16 frames of PSG + PCM (48,828 Hz)
+ * that VERA time has produced; returns how many.  vc_tick makes them. */
+int vc_audio_take(int16_t *buf, int max_samples);
 
 #endif

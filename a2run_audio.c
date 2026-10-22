@@ -1,12 +1,11 @@
 /* a2run_audio.c -- a2run's audio capture (plan E9).
  *
- *   --wav FILE     the VERA PSG + PCM + YM2151 mix (vc_audio_render) as a 16-bit stereo WAV
+ *   --wav FILE     the VERA PSG + PCM + YM2151 mix (vc_audio_take) as a 16-bit stereo WAV
  *                  at VERA's native rate, 25 MHz / 512 = 48,828.125 Hz (header:
- *                  48828).  Rendered once per VERA frame: a frame is 800 x 525
- *                  pixel clocks = 420,000 / 512 = 820.3125 samples, carried with
- *                  an integer remainder, so the sample count is exact over any
- *                  run.  Register writes therefore take effect at frame
- *                  boundaries (the game writes the PSG in the VSYNC IRQ anyway).
+ *                  48828).  The VERA makes a sample every 512 of its clocks as
+ *                  CPU time passes (veracore.c audio_clock), so register writes
+ *                  take effect at the sample they happen in; this file only
+ *                  collects them once per VERA frame.
  *   --psglog FILE  the 64 PSG register bytes ($1F9C0-$1F9FF) after every VERA
  *                  frame in which they changed: "<frame> <128 hex digits>\n"
  *                  (frame = a2run's count of completed frames, 1-based; frame 0
@@ -21,12 +20,10 @@
 #include "ym2151.h"
 
 #define WAV_RATE      48828
-#define FRAME_CLOCKS  420000u           /* 800 x 525 VERA pixel clocks */
-#define SAMPLE_CLOCKS 512u              /* one PSG sample */
 #define PSG_REGS      0x1F9C0
 
 static FILE *wav_f, *log_f;
-static uint32_t wav_samples, acc;
+static uint32_t wav_samples;
 static uint8_t last_regs[64];
 static int log_started;
 
@@ -47,7 +44,7 @@ int a2audio_open_wav(const char *path) {
 	wav_f = fopen(path, "wb");
 	if (!wav_f) return 0;
 	wav_header(wav_f, 0);
-	wav_samples = 0; acc = 0;
+	wav_samples = 0;
 	ym_audio_on();
 	return 1;
 }
@@ -74,15 +71,14 @@ void a2audio_frame(long frame) {
 	}
 	if (wav_f) {
 		static int16_t buf[2 * 1024];
-		acc += FRAME_CLOCKS;
-		unsigned n = acc / SAMPLE_CLOCKS;
-		acc %= SAMPLE_CLOCKS;
-		vc_audio_render(buf, (int)n);
-		ym_mix(buf, (int)n, WAV_RATE);              /* + the YM2151 (E14), to this cycle */
-		uint8_t out[4 * 1024];
-		for (unsigned i = 0; i < 2 * n; i++) le16(out + 2 * i, (uint16_t)buf[i]);
-		fwrite(out, 1, 4 * n, wav_f);
-		wav_samples += n;
+		int n;
+		while ((n = vc_audio_take(buf, 1024)) > 0) {   /* what VERA time has produced */
+			ym_mix(buf, n, WAV_RATE);                    /* + the YM2151 (E14), to this cycle */
+			uint8_t out[4 * 1024];
+			for (int i = 0; i < 2 * n; i++) le16(out + 2 * i, (uint16_t)buf[i]);
+			fwrite(out, 1, 4 * (size_t)n, wav_f);
+			wav_samples += n;
+		}
 	}
 }
 

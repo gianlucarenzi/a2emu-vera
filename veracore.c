@@ -280,13 +280,9 @@ static bool pcm_is_fifo_almost_empty(void)
     return pcm_fifo_cnt < 1024;
 }
 
-/* audio_render — called before PCM register writes to catch up audio state */
-static void audio_render(void) { }
-
-/* vc_audio_render — mix PSG + PCM into stereo int16 buffer.
- * Called from SDL audio callback. Sample rate = 25MHz / 512 ≈ 48828 Hz.
- * We resample to the SDL output rate in the callback. */
-void vc_audio_render(int16_t *buf, int num_samples)
+/* audio_render_samples -- PSG + PCM, num_samples stereo int16 frames at the VERA's
+ * 25 MHz / 512 = 48,828 Hz.  Only audio_clock calls it, as VERA time passes. */
+static void audio_render_samples(int16_t *buf, int num_samples)
 {
     /* audio diag stderr spam removed */
     for (int i = 0; i < num_samples; i++) {
@@ -343,6 +339,39 @@ void vc_audio_render(int16_t *buf, int num_samples)
     }
 }
 
+/* The audio runs on VERA time: one sample every 512 VERA clocks (audio.v's
+ * next_sample), so the PCM FIFO drains, and AFLOW changes, at the right moment
+ * whether or not anybody listens.  Samples wait in a ring for vc_audio_take();
+ * if nobody takes them the oldest are overwritten. */
+#define AUDIO_RING 8192
+static int16_t  audio_ring[AUDIO_RING * 2];
+static unsigned audio_ring_wr, audio_ring_cnt;
+static unsigned audio_clk;              /* VERA clocks towards the next sample */
+
+static void audio_clock(unsigned clocks)
+{
+    audio_clk += clocks;
+    while (audio_clk >= 512) {
+        audio_clk -= 512;
+        audio_render_samples(&audio_ring[audio_ring_wr * 2], 1);
+        audio_ring_wr = (audio_ring_wr + 1) % AUDIO_RING;
+        if (audio_ring_cnt < AUDIO_RING) audio_ring_cnt++;
+    }
+}
+
+int vc_audio_take(int16_t *buf, int max_samples)
+{
+    int n = max_samples < (int)audio_ring_cnt ? max_samples : (int)audio_ring_cnt;
+    unsigned rd = (audio_ring_wr + AUDIO_RING - audio_ring_cnt) % AUDIO_RING;
+
+    for (int i = 0; i < n; i++, rd = (rd + 1) % AUDIO_RING) {
+        buf[i * 2 + 0] = audio_ring[rd * 2 + 0];
+        buf[i * 2 + 1] = audio_ring[rd * 2 + 1];
+    }
+    audio_ring_cnt -= n;
+    return n;
+}
+
 /* ================================================================
  * SPI -- spi/spictrl.v of VERA 48.0.1, clocked by the 25 MHz VERA clock.
  * A byte is 8 bits x 2 SCK edges: SCK toggles every clock (16 clocks per
@@ -360,7 +389,7 @@ static uint8_t spi_miso_byte;           /* what the card drives during this byte
 static uint8_t spi_bitcnt;              /* bitcnt_r: busy while nonzero */
 static uint8_t spi_div;                 /* div_cnt_r */
 static bool    spi_clk;                 /* clk_r (SCK) */
-static double  spi_clk_carry;           /* fraction of a 25 MHz clock not yet run */
+static double  vera_clk_carry;          /* fraction of a 25 MHz clock not yet run (SPI, audio) */
 
 static void vera_spi_init(void)
 {
@@ -368,7 +397,7 @@ static void vera_spi_init(void)
     spi_tx = spi_rx = 0;
     spi_bitcnt = spi_div = 0;
     spi_clk = false;
-    spi_clk_carry = 0;
+    vera_clk_carry = 0;
     sdcard_select(0);
 }
 
@@ -1756,7 +1785,7 @@ video_read_reg(uint8_t reg)
         case 0x17: case 0x18: case 0x19: case 0x1A:
             return reg_layer[1][reg - 0x14];
 
-        case 0x1B: audio_render(); return pcm_read_ctrl();
+        case 0x1B: return pcm_read_ctrl();
         case 0x1C: return pcm_read_rate();
         case 0x1D: return 0;
 
@@ -1769,6 +1798,30 @@ video_read_reg(uint8_t reg)
 /* ================================================================
  * Register write
  * ================================================================ */
+
+/* Mid-line raster effects: draw the current line up to the beam (the caller has
+ * brought the VERA up to this CPU cycle), so a register or VRAM write lands at
+ * the pixel it happens on, not at the next line.  As x16emu's video_step(...,
+ * true); for DATA writes (VRAM, palette, sprites) x16emu needs -midline-effects,
+ * here it is on unless A2_VERA_MIDLINE=0. */
+static int vc_midline_data = -1;
+
+static void
+video_midline(void)
+{
+    if (reg_composer[0] & 2) {                      /* NTSC: half-line counter */
+        uint16_t y;
+        if (ntsc_scan_pos_y < SCAN_HEIGHT) {
+            y = ntsc_scan_pos_y - NTSC_Y_OFFSET_LOW;
+            if ((y & 1) == 0) render_line(y, ntsc_half_cnt);
+        } else {
+            y = ntsc_scan_pos_y - NTSC_Y_OFFSET_HIGH;
+            if ((y & 1) == 0) render_line(y | 1, ntsc_half_cnt);
+        }
+    } else if (!vc_norender) {
+        render_line(vga_scan_pos_y - VGA_Y_OFFSET, vga_scan_pos_x);
+    }
+}
 
 static void
 video_write_reg(uint8_t reg, uint8_t value)
@@ -1821,6 +1874,12 @@ video_write_reg(uint8_t reg, uint8_t value)
                 break;
             }
 
+            if (vc_midline_data < 0) {
+                const char *e = getenv("A2_VERA_MIDLINE");
+                vc_midline_data = e ? atoi(e) : 1;
+            }
+            if (vc_midline_data)
+                video_midline();                    /* potential mid-line raster effect */
             bool nibble = fx_nibble_bit[reg - 3];
             uint32_t address = get_and_inc_address(reg - 3, true);
 
@@ -1910,6 +1969,7 @@ video_write_reg(uint8_t reg, uint8_t value)
             break;
 
         case 0x09: case 0x0A: case 0x0B: case 0x0C: {
+            video_midline();                        /* potential mid-line raster effect */
             int i = reg - 0x09 + (io_dcsel << 2);
             /* DC_VIDEO is sampled once at end of run, which cannot distinguish
                "never enabled layer 0" from "enabled it, then crashed with it
@@ -2017,19 +2077,21 @@ video_write_reg(uint8_t reg, uint8_t value)
 
         case 0x0D: case 0x0E: case 0x0F:
         case 0x10: case 0x11: case 0x12: case 0x13:
+            video_midline();                        /* potential mid-line raster effect */
             reg_layer[0][reg - 0x0D] = value;
             refresh_layer_properties(0);
             break;
 
         case 0x14: case 0x15: case 0x16:
         case 0x17: case 0x18: case 0x19: case 0x1A:
+            video_midline();
             reg_layer[1][reg - 0x14] = value;
             refresh_layer_properties(1);
             break;
 
-        case 0x1B: audio_render(); pcm_write_ctrl(value); break;
-        case 0x1C: audio_render(); pcm_write_rate(value); break;
-        case 0x1D: audio_render(); pcm_write_fifo(value); break;
+        case 0x1B: pcm_write_ctrl(value); break;
+        case 0x1C: pcm_write_rate(value); break;
+        case 0x1D: pcm_write_fifo(value); break;
 
         case 0x1E:
         case 0x1F:
@@ -2125,11 +2187,12 @@ int vc_tick(vc_t *v, int cycles)
         vc_speed_carry = scaled - whole;
         vcyc = whole;
     }
-    {   /* the SPI runs on whole 25 MHz VERA clocks */
-        double clocks = vcyc * PIXEL_FREQ / CPU_MHZ + spi_clk_carry;
+    {   /* the SPI and the audio run on whole 25 MHz VERA clocks */
+        double clocks = vcyc * PIXEL_FREQ / CPU_MHZ + vera_clk_carry;
         unsigned whole = (unsigned)clocks;
-        spi_clk_carry = clocks - whole;
+        vera_clk_carry = clocks - whole;
         vera_spi_step(whole);
+        audio_clock(whole);
     }
     bool new_frame = video_step_internal(vcyc);
 

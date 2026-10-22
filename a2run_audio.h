@@ -1,5 +1,5 @@
 /* a2run_audio.h -- a2run's audio capture (plan E9): the VERA PSG + PCM mix
- * (vc_audio_render) to a WAV file, and a per-frame PSG register log. */
+ * (vc_audio_take) to a WAV file, and a per-frame PSG register log. */
 #ifndef A2RUN_AUDIO_H
 #define A2RUN_AUDIO_H
 

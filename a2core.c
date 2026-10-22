@@ -83,11 +83,16 @@ static int vera_sync(void) {
 	return vc_tick(&g_vera, steps);
 }
 
+/* ~32 CPU cycles, one instruction at a time: after each one the VERA catches up and
+   its IRQ line is presented, as the 6502 samples /IRQ at every instruction end. */
 void cpu_vera_step(void) {
 	if (!cvs_init) { cvs_last = ticks; cvs_init = 1; }
 	if (cvs_step1 < 0) cvs_step1 = getenv("A2_STEP1") ? 1 : 0;
-	puce6502Exec(cvs_step1 ? 1 : 32);
-	if (vera_sync() && g_vera_irq) puce6502IRQ();
+	unsigned int start = ticks;
+	do {
+		puce6502Exec(1);
+		if (vera_sync() && g_vera_irq) puce6502IRQ();
+	} while (!cvs_step1 && ticks - start < 32);
 }
 
 /* IIGS speed model . BOTH DEFAULT-OFF. g_cyareg_model = 0 -> $C036 is not modelled at all and... */
@@ -131,7 +136,7 @@ void vera_bus_init(void)
     vc_init(&g_vera);
     { const char *e = getenv("A2_SDCARD");                                       // SD card on the VERA's SPI
       if (e && *e && !sdcard_attach(e)) fprintf(stderr, "a2emu: cannot use SD card image %s\n", e); }
-    { const char *e = getenv("A2_YM"); ym_init(e ? atoi(e) : 1); }               // E14
+    { const char *e = getenv("A2_YM"); ym_init(e ? atoi(e) : 0); }               // E14: optional chip, default absent
     if (g_vera.framebuffer == NULL) {
         g_vera.framebuffer = calloc((size_t)VC_SCREEN_W * VC_SCREEN_H, sizeof(uint32_t));
     }

@@ -6,7 +6,7 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 - Put the Apple ROMs in `rom/` (`appleII+.rom`, `diskII.rom`, IIe 342-0135/0134 or 342-0303/0304, IIe video ROM 342-0133 or 342-0265 for lowercase/80 columns); they are not included.
 - ROM source: the images used during development came from the Asimov archive mirror,
   <https://mirrors.apple2.org.za/ftp.apple.asimov.net/emulators/rom_images/>
-  (`apple_ii+_rom.zip`, `Apple Disk II 16 Sector Interface Card ROM P5 - 341-0027.bin-with-D4-D7 data bits swapped.bin`
+  (`apple_ii+_rom.zip` -- its F800-FFFF replaced by `Apple II+ - 341-0020 - Applesoft BASIC Autostart Monitor F800 - 2716.bin` from the collection below: the image in the zip has the IRQ vector patched to $FF59 instead of $FA40, so IRQs never reach $03FE -- `Apple Disk II 16 Sector Interface Card ROM P5 - 341-0027.bin-with-D4-D7 data bits swapped.bin`
   as `diskII.rom` -- it must start with `A2 20 A0 00`: the file without that suffix is a raw chip
   dump with scrambled lines and never boots a disk -- and the IIe CPU and video ROMs from
   `APPLE Computer and Peripheral Card Roms Collection.zip`).
@@ -20,6 +20,7 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 - `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run`/`a2fs` in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them but keeps the installed `rom/`.
 - Keys: F9 warp, F10 pause, F11 reset, F12 help.
 - SD card: `A2_SDCARD=sd.img` (or `a2run --sdcard sd.img`) puts a raw image of 512-byte sectors (at least 512 KB) on the VERA's SPI port as an SDHC card in SPI mode (CMD0/1/8/9/10/12/13/16/17/18/24/25/55/58/59, ACMD13/23/41/51; written through).  The SPI follows VERA 48.0.1's `spictrl.v` clock by clock: a byte takes 16 VERA clocks, 512 with SLOW.
+- VERA timing: the VERA catches up to the CPU before every register access and after every instruction (where its IRQ is sampled, as on the 6502); its audio makes a sample every 512 VERA clocks, so the PCM FIFO and AFLOW follow CPU time.  Writes to the composer/layer registers and, unless `A2_VERA_MIDLINE=0`, to VRAM/palette/sprites draw the line up to the beam first: raster effects land on the pixel (x16emu does the VRAM part only with `-midline-effects`).
 - Env: `A2_WAV=out.wav` records the stereo card audio, `A2_SPEAKER=0` drops the speaker stream, `A2_FPS=1` prints the frame rate.
 - `make install` also installs `a2fs` and the SDK (`a2fs sdk` prints where), for cc65 programs
   booted straight from a Disk II floppy, no DOS:
@@ -36,8 +37,8 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 - `examples/sdtest` (`make test`): SD init, CSD, single/multiple block reads and writes over SPI, checked from the host.
 - `examples/hello` (`make run`) and `examples/fstest` (`make test`: reads two files, writes a
   third and reads it back, then checks it from the host) use the SDK from this tree.
-- `a2run --help` lists the headless options (`--hd`, `--frames`, `--wav`, `--ymlog`, `--ym off`, ...).
-- YM2151 core: ymfm (BSD-3, `extern/ymfm`).
+- `a2run --help` lists the headless options (`--hd`, `--frames`, `--wav`, `--ymlog`, `--ym on`, ...).
+- The VERA's PSG (and PCM) is always there; the A2VERA's YM2151 at VERA base + $20 is optional and absent by default: `A2_YM=1` (or `a2run --ym on`) fits it.  YM2151 core: ymfm (BSD-3, `extern/ymfm`).
 
 A2VERA code: @fletto666 
 YMFM integration: @sandlbn

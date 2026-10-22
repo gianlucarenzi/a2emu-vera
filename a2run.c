@@ -42,8 +42,8 @@
  *     --wav FILE            the VERA PSG + PCM mix as a WAV (48,828 Hz stereo 16-bit; E9,
  *                           a2run_audio.c)
  *     --psglog FILE         the PSG registers after every frame that changed them
- *     --ym on|off           the A2VERA's YM2151 at VERA base + $20 (E14; default on,
- *                           env A2_YM); its audio is in the --wav mix
+ *     --ym on|off           the A2VERA's optional YM2151 at VERA base + $20 (E14; default
+ *                           off = not fitted, env A2_YM=1); its audio is in the --wav mix
  *     --ymlog FILE          every YM2151 data write: "<frame> <reg> <val>" (hex)
  *     --pctrace N           print the last N program counters (one per ~32-cycle step) at exit
  *     --stop-pc ADDR        stop as soon as a step ends at ADDR (exit 125; with --pctrace)
