@@ -507,10 +507,6 @@ static uint8_t sprite_line_col[SCREEN_WIDTH];
 static uint8_t sprite_line_z[SCREEN_WIDTH];
 static uint8_t sprite_line_mask[SCREEN_WIDTH];
 static uint8_t sprite_line_collisions;
-static bool layer_line_enable[2];
-static bool old_layer_line_enable[2];
-static bool old_sprite_line_enable;
-static bool sprite_line_enable;
 
 /* ---- FX registers ---- */
 static uint8_t  fx_addr1_mode;
@@ -661,7 +657,7 @@ struct video_layer_properties {
 
 #define NUM_LAYERS 2
 static struct video_layer_properties layer_properties[NUM_LAYERS];
-static struct video_layer_properties prev_layer_properties[2][NUM_LAYERS];
+
 
 static int
 calc_layer_eff_x(const struct video_layer_properties *props, const int x)
@@ -1139,64 +1135,66 @@ expand_4bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
 static void
 render_sprite_line(const uint16_t y)
 {
+    /* sprite_renderer.v, timed per clock but event driven.  The finder takes one
+     * clock per attribute entry; a sprite on this line waits until the renderer is
+     * idle (render_busy = start_render_r || state != IDLE), then takes 1 clock
+     * (SF_START_RENDER).  The renderer takes 1 clock in IDLE, then per 32-bit word 2
+     * clocks of WAIT_FETCH and 1 clock per pixel (RENDER), pixels past x=640 included.
+     * Everything stops 798 clocks after the line render starts.  Not modelled: VRAM
+     * contention with the CPU and the layers (they have priority in vram_if.v); a
+     * fetch is taken as granted at once, so this is the most the hardware can draw. */
+    enum { SPRITE_CLOCKS = 798 };
+    unsigned tf = 0;                    /* finder clock */
+    unsigned rfree = 0;                 /* first clock the renderer is free */
+
     memset(sprite_line_col, 0, SCREEN_WIDTH);
     memset(sprite_line_z, 0, SCREEN_WIDTH);
     memset(sprite_line_mask, 0, SCREEN_WIDTH);
 
-    uint16_t sprite_budget = 800 + 1;
-    for (int i = 0; i < NUM_SPRITES; i++) {
-        sprite_budget--;
-        if (sprite_budget == 0) break;
+    for (int i = 0; i < NUM_SPRITES && tf < SPRITE_CLOCKS; i++, tf++) {
         const struct video_sprite_properties *props = &sprite_properties[i];
 
         if (props->sprite_zdepth == 0) continue;
         if (y < props->sprite_y || y >= props->sprite_y + props->sprite_height) continue;
 
-        const uint16_t eff_sy = props->vflip ? ((props->sprite_height - 1) - (y - props->sprite_y)) : (y - props->sprite_y);
+        unsigned ts = tf > rfree ? tf : rfree;      /* SF_START_RENDER */
+        if (ts >= SPRITE_CLOCKS) break;
+        tf = ts;                                    /* the finder resumes after it */
 
+        const uint16_t eff_sy = props->vflip ? ((props->sprite_height - 1) - (y - props->sprite_y)) : (y - props->sprite_y);
         int16_t       eff_sx      = (props->hflip ? (props->sprite_width - 1) : 0);
         const int16_t eff_sx_incr = props->hflip ? -1 : 1;
-
         const uint8_t *bitmap_data = video_ram + props->sprite_address + (eff_sy << (props->sprite_width_log2 - (1 - props->color_mode)));
+        const unsigned ppw = props->color_mode ? 4 : 8;   /* pixels per 32-bit word */
 
         uint8_t unpacked_sprite_line[64];
         const uint16_t width = (props->sprite_width < 64 ? props->sprite_width : 64);
-        const uint8_t vram_fetch_mask = ((2 - props->color_mode) << 2) - 1;
-        if (props->color_mode == 0) {
+        if (props->color_mode == 0)
             expand_4bpp_data(unpacked_sprite_line, bitmap_data, width);
-        } else {
+        else
             memcpy(unpacked_sprite_line, bitmap_data, width);
-        }
 
+        unsigned t = ts + 2;                        /* START, then IDLE with start_render_r */
         for (uint16_t sx = 0; sx < props->sprite_width; ++sx) {
+            if (sx % ppw == 0) t += 2;              /* WAIT_FETCH */
+            if (t >= SPRITE_CLOCKS) break;          /* render_time_done */
+            t++;                                    /* RENDER: this pixel */
+
             const uint16_t line_x = props->sprite_x + sx;
-            if (line_x >= SCREEN_WIDTH) {
-                eff_sx += eff_sx_incr;
-                continue;
-            }
-
-            if (!(sx & vram_fetch_mask)) {
-                sprite_budget--;
-                if (sprite_budget == 0) break;
-            }
-            sprite_budget--;
-            if (sprite_budget == 0) break;
-
             uint8_t col_index = unpacked_sprite_line[eff_sx];
             eff_sx += eff_sx_incr;
+            if (line_x >= SCREEN_WIDTH || col_index == 0) continue;
 
-            if (col_index > 0) {
-                sprite_line_collisions |= sprite_line_mask[line_x] & props->sprite_collision_mask;
-                sprite_line_mask[line_x] |= props->sprite_collision_mask;
-
-                if (props->sprite_zdepth > sprite_line_z[line_x]) {
-                    if (col_index < 16)
-                        col_index += props->palette_offset;
-                    sprite_line_col[line_x] = col_index;
-                    sprite_line_z[line_x] = props->sprite_zdepth;
-                }
+            sprite_line_collisions |= sprite_line_mask[line_x] & props->sprite_collision_mask;
+            if (props->sprite_zdepth > sprite_line_z[line_x]) {     /* render_pixel */
+                if (col_index < 16)
+                    col_index += props->palette_offset;
+                sprite_line_col[line_x] = col_index;
+                sprite_line_z[line_x] = props->sprite_zdepth;
+                sprite_line_mask[line_x] |= props->sprite_collision_mask;   /* only when written */
             }
         }
+        rfree = t;                                  /* back in IDLE */
     }
 }
 
@@ -1207,8 +1205,8 @@ render_sprite_line(const uint16_t y)
 static void
 render_layer_line_text(uint8_t layer, uint16_t y)
 {
-    const struct video_layer_properties *props = &prev_layer_properties[1][layer];
-    const struct video_layer_properties *props0 = &prev_layer_properties[0][layer];
+    const struct video_layer_properties *props = &layer_properties[layer];   /* at the line change */
+    const struct video_layer_properties *props0 = props;
 
     const uint8_t max_pixels_per_byte = (8 >> props->color_depth) - 1;
     const int     eff_y               = calc_layer_eff_y(props0, y);
@@ -1292,8 +1290,8 @@ render_layer_line_text(uint8_t layer, uint16_t y)
 static void
 render_layer_line_tile(uint8_t layer, uint16_t y)
 {
-    const struct video_layer_properties *props = &prev_layer_properties[1][layer];
-    const struct video_layer_properties *props0 = &prev_layer_properties[0][layer];
+    const struct video_layer_properties *props = &layer_properties[layer];   /* at the line change */
+    const struct video_layer_properties *props0 = props;
 
     const uint8_t max_pixels_per_byte = (8 >> props->color_depth) - 1;
     const int     eff_y               = calc_layer_eff_y(props0, y);
@@ -1397,15 +1395,14 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
 static void
 render_layer_line_bitmap(uint8_t layer, uint16_t y)
 {
-    const struct video_layer_properties *props = &prev_layer_properties[1][layer];
+    const struct video_layer_properties *props = &layer_properties[layer];   /* at the line change */
+    uint8_t palette_offset = reg_layer[layer][4] & 0xf;
 
     int yy = y % props->tileh;
     uint32_t y_add = (yy * props->tilew * props->bits_per_pixel) >> 3;
 
     for (int x = 0; x < SCREEN_WIDTH; x++) {
         int xx = x % props->tilew;
-
-        uint8_t palette_offset = reg_layer[layer][4] & 0xf;
 
         uint16_t x_add = (xx * props->bits_per_pixel) >> 3;
         uint32_t tile_offset = y_add + x_add;
@@ -1451,15 +1448,19 @@ render_line(uint16_t y, float scan_pos_x)
     uint16_t vstart = reg_composer[6] << 1;
     uint16_t vstop = reg_composer[7] << 1;
 
+    /* A new line: as the HDL renders line y into its line buffers during line y-1
+       (layer_renderer.v / sprite_renderer.v, from x=2 of y-1), the layer and sprite
+       buffers are built here, ONCE, from the VRAM and layer registers as they were at
+       the end of line y-1 (video_step_internal makes this first call at the line
+       change, before any write of line y).  Writes during line y reach line y+1; only
+       the composer (palette, border, window, HSCALE, enables) acts on the shown line,
+       per pixel, in the segments below. */
     if (y != y_prev) {
         y_prev = y;
         s_pos_x_p = 0;
 
         memcpy(prev_reg_composer[1], prev_reg_composer[0], sizeof(*reg_composer) * COMPOSER_SLOTS);
         memcpy(prev_reg_composer[0], reg_composer, sizeof(*reg_composer) * COMPOSER_SLOTS);
-
-        memcpy(prev_layer_properties[1], prev_layer_properties[0], sizeof(*layer_properties) * NUM_LAYERS);
-        memcpy(prev_layer_properties[0], layer_properties, sizeof(*layer_properties) * NUM_LAYERS);
 
         if ((dc_video & 3) > 1) { /* 480i or 240p */
             if ((y >> 1) == 0) {
@@ -1468,10 +1469,42 @@ render_line(uint16_t y, float scan_pos_x)
                 eff_y_fp += (prev_reg_composer[1][2] << 10);
             }
         } else {
-            if (y == 0) {
+            /* composer.v: the scaled counter restarts at 0 on the first line >= VSTART
+               of the frame and steps on line y only if line y-1 was inside
+               VSTART..VSTOP (registers as sampled at the start of y-1) */
+            static bool vstarted;
+            uint16_t vs1 = prev_reg_composer[1][6] << 1, ve1 = prev_reg_composer[1][7] << 1;
+            if (y == 0)
+                vstarted = false;
+            if (!vstarted && y >= vs1) {
+                vstarted = true;
                 eff_y_fp = 0;
-            } else if ((y >= vstart) && (y < vstop)) {
+            } else if (vstarted && (eff_y_fp >> 16) < 480 && y - 1 >= vs1 && y - 1 < ve1) {
                 eff_y_fp += (prev_reg_composer[1][2] << 9);
+            }
+        }
+
+        uint16_t ly = ((dc_video & 8) && (dc_video & 3) > 1) ? (y & 0xfffe) : y;
+        if (ly < SCREEN_HEIGHT) {
+            uint16_t eff_y = (eff_y_fp >> 16);
+            if (eff_y >= 480) eff_y = 480 - (ly & 1);
+
+            if (dc_video & 0x40) {
+                render_sprite_line(eff_y);
+            } else {
+                memset(sprite_line_col, 0, sizeof sprite_line_col);
+                memset(sprite_line_z, 0, sizeof sprite_line_z);
+                memset(sprite_line_mask, 0, sizeof sprite_line_mask);
+            }
+            for (uint8_t layer = 0; layer < 2; layer++) {
+                if (!(dc_video & (0x10 << layer)))
+                    memset(layer_line[layer], 0, sizeof layer_line[layer]);  /* no fetches */
+                else if (layer_properties[layer].text_mode)
+                    render_layer_line_text(layer, eff_y);
+                else if (layer_properties[layer].bitmap_mode)
+                    render_layer_line_bitmap(layer, eff_y);
+                else
+                    render_layer_line_tile(layer, eff_y);
             }
         }
     }
@@ -1497,51 +1530,8 @@ render_line(uint16_t y, float scan_pos_x)
     uint16_t hstart = reg_composer[4] << 2;
     uint16_t hstop = reg_composer[5] << 2;
 
-    uint16_t eff_y = (eff_y_fp >> 16);
-    if (eff_y >= 480) eff_y = 480 - (y & 1);
-
-    layer_line_enable[0] = dc_video & 0x10;
-    layer_line_enable[1] = dc_video & 0x20;
-    sprite_line_enable   = dc_video & 0x40;
-
-    for (uint8_t layer = 0; layer < 2; layer++) {
-        if (!layer_line_enable[layer] && old_layer_line_enable[layer]) {
-            for (uint16_t i = s_pos_x_p; i < SCREEN_WIDTH; i++)
-                layer_line[layer][i] = 0;
-        }
-        if (s_pos_x_p == 0)
-            old_layer_line_enable[layer] = layer_line_enable[layer];
-    }
-
-    if (!sprite_line_enable && old_sprite_line_enable) {
-        for (uint16_t i = s_pos_x_p; i < SCREEN_WIDTH; i++) {
-            sprite_line_col[i] = 0;
-            sprite_line_z[i] = 0;
-            sprite_line_mask[i] = 0;
-        }
-    }
-    if (s_pos_x_p == 0)
-        old_sprite_line_enable = sprite_line_enable;
-
-    if (sprite_line_enable)
-        render_sprite_line(eff_y);
-
-    if (layer_line_enable[0]) {
-        if (prev_layer_properties[1][0].text_mode)
-            render_layer_line_text(0, eff_y);
-        else if (prev_layer_properties[1][0].bitmap_mode)
-            render_layer_line_bitmap(0, eff_y);
-        else
-            render_layer_line_tile(0, eff_y);
-    }
-    if (layer_line_enable[1]) {
-        if (prev_layer_properties[1][1].text_mode)
-            render_layer_line_text(1, eff_y);
-        else if (prev_layer_properties[1][1].bitmap_mode)
-            render_layer_line_bitmap(1, eff_y);
-        else
-            render_layer_line_tile(1, eff_y);
-    }
+    /* the composer masks the layers and sprites with the live enables (composer.v) */
+    const bool en_l0 = dc_video & 0x10, en_l1 = dc_video & 0x20, en_spr = dc_video & 0x40;
 
     if (out_mode != 0) {
         if (y < vstart || y >= vstop) {
@@ -1559,7 +1549,8 @@ render_line(uint16_t y, float scan_pos_x)
             const uint32_t scale = reg_composer[1];
             for (uint16_t x = MAX(hstart, s_pos_x_p); x < hstop && x < s_pos_x; ++x) {
                 uint16_t eff_x = eff_x_fp >> 16;
-                col_line[x] = (eff_x < SCREEN_WIDTH) ? calculate_line_col_index(sprite_line_z[eff_x], sprite_line_col[eff_x], layer_line[0][eff_x], layer_line[1][eff_x]) : 0;
+                col_line[x] = (eff_x < SCREEN_WIDTH) ? calculate_line_col_index(en_spr ? sprite_line_z[eff_x] : 0, sprite_line_col[eff_x],
+                                                                                en_l0 ? layer_line[0][eff_x] : 0, en_l1 ? layer_line[1][eff_x] : 0) : 0;
                 eff_x_fp += (scale << 9);
             }
             for (uint16_t x = hstop; x < s_pos_x; ++x)
@@ -1618,6 +1609,21 @@ update_isr_and_coll(uint16_t y, uint16_t compare)
  * 16,000,000 / (60 * 525) ~ 508 */
 #define CPU_MHZ 16.0f
 
+/* the field line the NTSC half-line counter is drawing, if it draws one (even
+   half-lines of each field; the second field draws the odd lines) */
+static bool
+ntsc_field_line(uint16_t *y)
+{
+    if (ntsc_scan_pos_y < SCAN_HEIGHT) {
+        *y = ntsc_scan_pos_y - NTSC_Y_OFFSET_LOW;
+        return (*y & 1) == 0;
+    }
+    *y = ntsc_scan_pos_y - NTSC_Y_OFFSET_HIGH;
+    if (*y & 1) return false;
+    *y |= 1;
+    return true;
+}
+
 static bool
 video_step_internal(float steps)
 {
@@ -1641,8 +1647,11 @@ video_step_internal(float steps)
                 frame_count++;
             }
         }
-        if (!ntsc_mode)
+        if (!ntsc_mode) {
             update_isr_and_coll(vga_scan_pos_y - VGA_Y_OFFSET, irq_line);
+            if (!vc_norender)
+                render_line(vga_scan_pos_y - VGA_Y_OFFSET, 0);   /* build the new line's buffers now */
+        }
     }
 
     ntsc_half_cnt += PIXEL_FREQ * steps / CPU_MHZ;
@@ -1676,10 +1685,13 @@ video_step_internal(float steps)
             }
         }
         if (ntsc_mode) {
+            uint16_t ny;
             if (ntsc_scan_pos_y < SCAN_HEIGHT)
                 update_isr_and_coll(ntsc_scan_pos_y - NTSC_Y_OFFSET_LOW, irq_line & ~1);
             else
                 update_isr_and_coll(ntsc_scan_pos_y - NTSC_Y_OFFSET_HIGH, irq_line & ~1);
+            if (ntsc_field_line(&ny))
+                render_line(ny, 0);                              /* build the new line's buffers now */
         }
     }
 
@@ -1702,8 +1714,16 @@ static uint8_t
 video_read_reg(uint8_t reg)
 {
     bool ntsc_mode = reg_composer[0] & 2;
-    uint16_t scanline = ntsc_mode ? ntsc_scan_pos_y % SCAN_HEIGHT : vga_scan_pos_y;
-    if (scanline >= 512) scanline = 511;
+    /* composer.v: SCANLINE is y_counter_r, the line being RENDERED (shown + 1), 9 bits
+       (so it reads 0 while line 511 is shown), pegged at 511 while the shown line
+       (y_counter_rr) is 512-524.  (NTSC: still the half-line count, approximate.) */
+    uint16_t scanline;
+    if (ntsc_mode) {
+        scanline = ntsc_scan_pos_y % SCAN_HEIGHT;
+        if (scanline >= 512) scanline = 511;
+    } else {
+        scanline = vga_scan_pos_y >= 512 ? 511 : (vga_scan_pos_y + 1) & 0x1FF;
+    }
 
     switch (reg & 0x1F) {
         case 0x00: return io_addr[io_addrsel] & 0xff;
@@ -1811,13 +1831,8 @@ video_midline(void)
 {
     if (reg_composer[0] & 2) {                      /* NTSC: half-line counter */
         uint16_t y;
-        if (ntsc_scan_pos_y < SCAN_HEIGHT) {
-            y = ntsc_scan_pos_y - NTSC_Y_OFFSET_LOW;
-            if ((y & 1) == 0) render_line(y, ntsc_half_cnt);
-        } else {
-            y = ntsc_scan_pos_y - NTSC_Y_OFFSET_HIGH;
-            if ((y & 1) == 0) render_line(y | 1, ntsc_half_cnt);
-        }
+        if (ntsc_field_line(&y))
+            render_line(y, ntsc_half_cnt);
     } else if (!vc_norender) {
         render_line(vga_scan_pos_y - VGA_Y_OFFSET, vga_scan_pos_x);
     }
