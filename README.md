@@ -14,6 +14,9 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   the original hardware.** If you do, dumping the chips of your own machine is the clean way to get them.
 - Run: `A2_MODEL=iie ./a2emu disk.po` (from this directory); `iiee` = enhanced IIe, `A2_AUX=64` adds the extended 80-column card.
   The window title shows the model (`Reinette ][+`, `Reinette //e`, `Reinette //e (enhanced)`) and the disks.
+  Double-res video (IIe with aux memory only): with 80COL on and `$C05E` (AN3 off, DHIRES) the
+  graphics modes become double hi-res (560 dots, 140 x 192 in 16 colours) and double lo-res (80 x 48);
+  `$C05F` or a reset turns it off.  Without an aux card, and on the ][+, `$C05E` changes nothing.
   **`PR#3` (80 columns) needs `A2_AUX=64`**: the IIe defaults to no aux memory, and at reset the IIe
   firmware enables its own 80-column code at $C3xx only if it finds aux memory; otherwise it leaves
   the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
@@ -66,6 +69,8 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   `vera_demo` (320x240 8 bpp bitmap) and `memtest` (IIe aux RAM + VERA registers + VRAM).
 - `examples/ramworks` (`make test`): IIe aux banking for every `--aux` size, and the RAM2E II's
   commands over three power-ons (detection, LED, capacity mask, command timeout, saved settings).
+- `examples/dblres` (`make run`): 16 colour bars in double hi-res, then double lo-res, then plain
+  hi-res with DHIRES off (a key steps through them).
 - `examples/hello` (`make run`) and `examples/fstest` (`make test`: reads two files, writes a
   third and reads it back, then checks it from the host) use the SDK from this tree.
 - The header of `a2run.c` lists the headless options (`--model`, `--aux`, `--hd`, `--frames`, `--keys`,
@@ -83,6 +88,7 @@ What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera 
 | IIe video | TEXT drawn with the IIe video ROM (lowercase, inverse, MouseText); 80-column TEXT from aux memory, 80STORE keeps page 1 on screen | 8e869a4, 4187b00 |
 | IIe aux memory | `--aux` / `A2_AUX` = `0`, `64K`, `512K`, `1M`, `4M`, `8M`: extended 80-column card or RamWorks III banking at `$C071`-`$C077` | ed1ff1e, 7d7d653 |
 | RAM2E II | `--aux RAM2E`: Garrett's Workshop RAM2E II after its HDL -- command sequence, detection, capacity mask, LED, settings saved in `ram2e.nvm`; GWRAM.SYSTEM works | 7d7d653 |
+| IIe double-res | Double hi-res and double lo-res when DHIRES (`$C05E`), 80COL and an aux card are on; colours as MAME; `examples/dblres` | (pending) |
 | Disk II | Timed disk model: a write starts on the next nibble, not the one just read | 7943cab |
 | VERA | Line buffers, SCANLINE, VSTART and sprite timing per the 48.0.1 HDL; audio on VERA time, IRQ per instruction, mid-line raster effects; ISR write clears bits 2:0 only; SPI per `spictrl.v` with an SD card image; 16-bit PCM fixed | 17e1791, 92f4bd4, 484a5c6, 1aa0e1e |
 | VERA slot | Configurable slot (`A2_VERA_SLOT`, `--vera-slot`); runtime slot detection for programs, robust against the hard disk and the floating bus | cd7ba20, 2c17344, f96c473, 2517f88, 40c0870 |

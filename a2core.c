@@ -207,8 +207,11 @@ bool LCWFF = false;                                                             
  * RAM2E II (g_ram2e, 8 MB): the same register plus its configuration commands, after
  * Garrett's Workshop's HDL (RAM2E.v, UFM-MAX.v; see ram2e_write()).  It has no reset
  * line, so its bank, capacity mask and LED setting survive a reset.
- * Not modelled: double-res VIDEO (the frontend draws 40/80-column TEXT only),
- * snapshots of the IIe state, the IIe keyboard's auto-repeat. */
+ * Double-res video: DHIRES is set by any access to $C05E (AN3 off) and cleared by $C05F
+ * or a reset; the frontend draws double hi-res / double lo-res when DHIRES, 80COL and
+ * graphics are on and aux memory is fitted (a2_aux_ram() != NULL), as MAME does.
+ * Not modelled: snapshots of the IIe state, the IIe keyboard's auto-repeat, IOUDIS
+ * and the $C07F RDDHIRES read. */
 int      g_iie = 0;
 int      g_iie_aux = 0;                /* aux 64 KB banks: 0 = none, 1 = extended 80-column
                                           card, 2-128 = RamWorks-style card ($C073) */
@@ -222,6 +225,7 @@ static uint8_t *aux = auxbank0.ram, *auxlgc = auxbank0.lgc, *auxbk2 = auxbank0.b
 int      g_ram2e = 0;                  /* 1 = the aux card is a RAM2E II */
 bool S80STORE = false, RAMRD = false, RAMWRT = false, ALTZP = false;
 bool INTCXROM = false, SLOTC3ROM = false, S80COL = false, ALTCHAR = false;
+bool DHIRES = false;                   /* IIe AN3 off: double-res graphics */
 
 /* the bank a RAM access to `a` (< $C000) uses; ZP/stack come via the ALTZP swap */
 static uint8_t noaux_rd[256], noaux_wr[256];   /* no aux card: reads $FF, writes lost */
@@ -1146,6 +1150,9 @@ uint8_t softSwitches(uint16_t address, uint8_t value, bool WRT) {
   		if (g_gpad_en) { if (!g_gp_an1 && g_gpad_idx < 8) g_gpad_idx++; g_gp_an1 = 1; }
   		break;                                                                    //   CLOCK/shift only on low->high edge
 
+  	case 0xC05E: if (g_iie) DHIRES = true;  break;                              // AN3 off: double-res
+  	case 0xC05F: if (g_iie) DHIRES = false; break;                              // AN3 on
+
   	case 0xC061: return PB0;                                                    // Push Button 0
   	case 0xC062: return PB1;                                                    // Push Button 1
   	case 0xC063:                                                                // Push Button 2 / NES 4021 DATA
@@ -1376,7 +1383,7 @@ void a2_reset(void) {
 	if (g_iie) {
 		if (!g_ram2e) iie_set_auxbank(0);             /* the RAM2E has no reset line */
 		iie_set_altzp(false);
-		S80STORE = RAMRD = RAMWRT = INTCXROM = SLOTC3ROM = S80COL = ALTCHAR = false;
+		S80STORE = RAMRD = RAMWRT = INTCXROM = SLOTC3ROM = S80COL = ALTCHAR = DHIRES = false;
 		LCRD = false; LCBK2 = true; LCWR = true; LCWFF = false;
 		iie_update_memslow();
 	}

@@ -102,6 +102,7 @@ extern int  g_iie;                          // 0 = ][+, 1 = IIe, 2 = enhanced II
 extern int  g_iie_aux;                      // aux 64 KB banks: 0 none, 1 80-col card, 2-128 RamWorks ($C073)
 extern int  g_memslow;
 extern bool S80STORE, RAMRD, RAMWRT, ALTZP, INTCXROM, SLOTC3ROM, S80COL, ALTCHAR;
+extern bool DHIRES;                         // IIe AN3 off ($C05E): double-res when 80COL + aux
 int  a2_load_iie_roms(const char *dir, int enhanced);   // 1 = loaded, IIe mode on
 int  a2_load_iie_video_rom(const char *dir, int enhanced, uint8_t *buf);   // 2 KB charset, 1 = loaded
 const uint8_t *a2_aux_ram(void);            // aux bank 0 (the video one), NULL without aux memory

@@ -12,3 +12,4 @@ examples/*/*.img
 examples/*/*.png
 !examples/vera/font*.bin
 /ram2e.nvm
+examples/*/data.inc

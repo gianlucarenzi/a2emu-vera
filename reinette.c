@@ -220,6 +220,9 @@ int main(int argc, char *argv[]) {
 	bool was80 = false;                                                           // last frame drew 80 columns
 	int LoResCache[24][40] = { 0 };
 	int HiResCache[192][40] = { 0 };                                              // check which Hi-Res 7 dots needs redraw
+	int DHiResCache[192][20] = { 0 };                                             // IIe double hi-res: 28 dots (2 columns)
+	int DLoResCache[24][40] = { 0 };                                              // IIe double lo-res: aux << 8 | main
+	int lastGfx = -1;                                                             // graphics mode of the last frame
 	uint8_t previousBit[192][40] = { 0 };                                         // the last bit value of the byte before.
 
 	enum characterAttribute { A_NORMAL, A_INVERSE, A_FLASH } glyphAttr;           // character attribute in TEXT
@@ -686,9 +689,45 @@ int main(int argc, char *argv[]) {
 		//============================================================= VIDEO OUTPUT
 
 		bool showPage2 = PAGE2 && !S80STORE;                                        // IIe 80STORE: PAGE2 selects aux, not the page
+		const uint8_t *auxRam = a2_aux_ram();
+		bool dbl = !TEXT && DHIRES && S80COL && auxRam;                             // IIe double-res: needs the aux card
+		int gfx = TEXT ? 0 : (HIRES ? 1 : 2) + (dbl ? 2 : 0);
+		if (gfx != lastGfx) {                                                       // another graphics mode: redraw it all
+			memset(LoResCache, -1, sizeof LoResCache);
+			memset(HiResCache, -1, sizeof HiResCache);
+			memset(DHiResCache, -1, sizeof DHiResCache);
+			memset(DLoResCache, -1, sizeof DLoResCache);
+			lastGfx = gfx;
+		}
+
+		// DOUBLE HIGH RES GRAPHICS (IIe, aux card): 560 dots, aux and main bytes interleaved;
+		// every 4 dots (first dot = bit 0) are one lo-res color, rotated left by one (MAME)
+		if (!TEXT && HIRES && dbl) {
+			uint16_t vRamBase = 0x2000 + showPage2 * 0x2000;
+			uint8_t lastLine = MIXED ? 160 : 192;
+			SDL_Rect dots = { 0, 0, 4, 1 };
+			SDL_RenderSetScale(rdr, zoom / 2.0f, zoom);
+			for (int line = 0; line < lastLine; line++) {
+				const uint8_t *m = ram + vRamBase + offsetHGR[line], *a = auxRam + vRamBase + offsetHGR[line];
+				dots.y = line;
+				for (int col = 0; col < 40; col += 2) {                                 // 2 columns = 28 dots = 7 colors
+					uint32_t w = (uint32_t)(a[col] & 0x7F) | (uint32_t)(m[col] & 0x7F) << 7
+					           | (uint32_t)(a[col + 1] & 0x7F) << 14 | (uint32_t)(m[col + 1] & 0x7F) << 21;
+					if (DHiResCache[line][col / 2] == (int)w && flashCycle) continue;
+					DHiResCache[line][col / 2] = (int)w;
+					for (int p = 0; p < 7; p++) {
+						uint8_t n = (w >> (p * 4)) & 0x0F, c = ((n << 1) | (n >> 3)) & 0x0F;
+						SDL_SetRenderDrawColor(rdr, color[c][0], color[c][1], color[c][2], SDL_ALPHA_OPAQUE);
+						dots.x = col * 14 + p * 4;
+						SDL_RenderFillRect(rdr, &dots);
+					}
+				}
+			}
+			SDL_RenderSetScale(rdr, zoom, zoom);
+		}
 
 		// HIGH RES GRAPHICS
-		if (!TEXT && HIRES) {
+		else if (!TEXT && HIRES) {
 			uint16_t word;
 			uint8_t bits[16], bit, pbit, colorSet, even;
 			uint16_t vRamBase = 0x2000 + showPage2 * 0x2000;
@@ -733,6 +772,33 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+		// DOUBLE LOW RES GRAPHICS (IIe, aux card): 80 x 48, each 40-column cell is an aux
+		// block (its color rotated left by one, MAME) then a main block, 7 dots each
+		else if (dbl) {
+			uint16_t vRamBase = 0x400 + showPage2 * 0x0400;
+			uint8_t lastLine = MIXED ? 20 : 24;
+			SDL_Rect blk = { 0, 0, 7, 4 };
+			SDL_RenderSetScale(rdr, zoom / 2.0f, zoom);
+			for (int line = 0; line < lastLine; line++) {
+				for (int col = 0; col < 40; col++) {
+					uint8_t av = auxRam[vRamBase + offsetGR[line] + col], mv = ram[vRamBase + offsetGR[line] + col];
+					if (DLoResCache[line][col] == (av << 8 | mv) && flashCycle) continue;
+					DLoResCache[line][col] = av << 8 | mv;
+					for (int half = 0; half < 2; half++) {                              // top block = low nibble
+						uint8_t an = half ? av >> 4 : av & 0x0F;
+						uint8_t c[2] = { (uint8_t)(((an << 1) | (an >> 3)) & 0x0F), (uint8_t)(half ? mv >> 4 : mv & 0x0F) };
+						blk.y = line * 8 + half * 4;
+						for (int s = 0; s < 2; s++) {
+							SDL_SetRenderDrawColor(rdr, color[c[s]][0], color[c[s]][1], color[c[s]][2], SDL_ALPHA_OPAQUE);
+							blk.x = col * 14 + s * 7;
+							SDL_RenderFillRect(rdr, &blk);
+						}
+					}
+				}
+			}
+			SDL_RenderSetScale(rdr, zoom, zoom);
+		}
+
 		// lOW RES GRAPHICS
 		else if (!TEXT) {                                                           // and not in HIRES
 			uint16_t vRamBase = 0x400 + showPage2 * 0x0400;
@@ -763,7 +829,6 @@ int main(int argc, char *argv[]) {
 		}
 
 		// TEXT 80 COLUMNS (IIe with the extended 80-column card)
-		const uint8_t *auxRam = a2_aux_ram();
 		bool is80 = (TEXT || MIXED) && S80COL && auxRam && iieCharTexture;
 		if (is80 != was80) {                                                        // 40 <-> 80: redraw every cell
 			memset(TextCache, -1, sizeof TextCache);
