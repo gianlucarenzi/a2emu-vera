@@ -79,7 +79,8 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 
 ## Changes from upstream
 
-What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera `main` (9cddaec):
+What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera `main` (9cddaec);
+`HISTORY.md` has the reasoning, sources and test evidence behind it:
 
 | Area | Change | Commits |
 |---|---|---|
