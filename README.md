@@ -11,6 +11,10 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   **The Apple ROMs are copyrighted by Apple: downloading them is not legal unless you actually own
   the original hardware.** If you do, dumping the chips of your own machine is the clean way to get them.
 - Run: `A2_MODEL=iie ./a2emu disk.po` (from this directory); `iiee` = enhanced IIe, `A2_AUX=64` adds the extended 80-column card.
+  **`PR#3` (80 columns) needs `A2_AUX=64`**: the IIe defaults to no aux memory, and at reset the IIe
+  firmware enables its own 80-column code at $C3xx only if it finds aux memory; otherwise it leaves
+  the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
+  `a2run` takes `--aux 64` for the same.
 - `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run` launchers in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them.
 - Keys: F9 warp, F10 pause, F11 reset, F12 help.
 - Env: `A2_WAV=out.wav` records the stereo card audio, `A2_SPEAKER=0` drops the speaker stream, `A2_FPS=1` prints the frame rate.
