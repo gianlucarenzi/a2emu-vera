@@ -28,7 +28,23 @@ windows: $(SRC)
 	$(MXE)-gcc $(CFLAGS) `$(MXE)-pkg-config --cflags sdl2` -o a2emu.exe $(SRC) ym2151.o ymfm_opm.o \
 	  `$(MXE)-pkg-config --libs sdl2` -lstdc++ -lm
 
+# make install: binaries + assets/ (+ rom/ if present) in DATADIR, launchers in BINDIR
+DATADIR ?= $(HOME)/.local/share/a2emu-vera
+BINDIR  ?= $(HOME)/bin
+install: a2emu a2run
+	mkdir -p $(DATADIR)/assets $(BINDIR)
+	install -m755 a2emu a2run $(DATADIR)/
+	install -m644 assets/*.bmp $(DATADIR)/assets/
+	if [ -d rom ]; then mkdir -p $(DATADIR)/rom && install -m644 rom/* $(DATADIR)/rom/; \
+	else echo "note: no rom/ here, put the Apple ROMs in $(DATADIR)/rom"; fi
+	for s in a2emu a2run; do \
+	  sed 's|@DATADIR@|$(DATADIR)|' scripts/$$s.in > $(BINDIR)/$$s && chmod 755 $(BINDIR)/$$s; done
+
+uninstall:
+	rm -f $(BINDIR)/a2emu $(BINDIR)/a2run
+	rm -rf $(DATADIR)
+
 clean:
 	rm -f a2emu a2run a2emu.exe *.o
 
-.PHONY: all windows clean
+.PHONY: all windows install uninstall clean
