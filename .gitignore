@@ -3,3 +3,4 @@ examples/*/*.o
 examples/*/*.bin
 examples/*/*.dsk
 examples/*/*.map
+/sdk/boot.sector

@@ -17,12 +17,23 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   firmware enables its own 80-column code at $C3xx only if it finds aux memory; otherwise it leaves
   the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
   `a2run` takes `--aux 64` for the same.
-- `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run` launchers in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them.
+- `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run`/`a2fs` in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them but keeps the installed `rom/`.
 - Keys: F9 warp, F10 pause, F11 reset, F12 help.
 - Env: `A2_WAV=out.wav` records the stereo card audio, `A2_SPEAKER=0` drops the speaker stream, `A2_FPS=1` prints the frame rate.
-- `examples/hello`: a cc65 C program on a self-booting disk, no DOS (`make`, `make run`): a
-  boot sector (`boot.s`) loads the program with the Disk II PROM's sector reader, `mkdsk.py`
-  writes the `.dsk`.
+- `make install` also installs `a2fs` and the SDK (`a2fs sdk` prints where), for cc65 programs
+  booted straight from a Disk II floppy, no DOS:
+  - `a2fs mkimage prog.dsk prog.bin [NAME=FILE ...]`: bootable image (`sdk/boot.s` loads the
+    program at $0900 with the Disk II PROM's sector reader) with files in A2FS, a minimal file
+    system (directory on track 17, contiguous files with a CRC-16); `a2fs ls|get|put|rm` work on
+    images, `a2fs --help` has the layout.
+  - link with `sdk/a2emu-vera.cfg`; for files on the Apple add `sdk/a2fs.c sdk/rwts.s` and
+    `#include "a2fs.h"` (`fs_start`, `fs_mount`, `fs_read`, `fs_write`, `blk_read`, `blk_write`).
+    `rwts.s` reads and writes with the real drive's timing.
+  - in a project: `SDK := $(shell a2fs sdk)`, then
+    `cl65 -t apple2 -C $(SDK)/a2emu-vera.cfg -I $(SDK) -Osir -Cl -o prog.bin main.c $(SDK)/a2fs.c $(SDK)/rwts.s`
+    and `a2fs mkimage prog.dsk prog.bin DATA=data.bin`.
+- `examples/hello` (`make run`) and `examples/fstest` (`make test`: reads two files, writes a
+  third and reads it back, then checks it from the host) use the SDK from this tree.
 - `a2run --help` lists the headless options (`--hd`, `--frames`, `--wav`, `--ymlog`, `--ym off`, ...).
 - YM2151 core: ymfm (BSD-3, `extern/ymfm`).
 

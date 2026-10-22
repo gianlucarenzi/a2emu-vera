@@ -1,10 +1,11 @@
-; boot.s -- Disk II boot sector (track 0, sector 0): loads NSECT sectors to LOAD
-; and jumps there.  No DOS: it reuses the P5A PROM's sector reader at $Cn5C,
-; which re-enters us at $0801 after every sector ($27 and $3D already advanced).
-; The payload follows on the disk in physical-sector order: track 0 sectors
-; 1-15, then track 1 sectors 0-15, and so on.
+; boot.s -- Disk II boot sector (track 0, sector 0): loads the program that
+; follows it on the disk and jumps to it.  No DOS: it reuses the P5A PROM's
+; sector reader at $Cn5C, which re-enters us at $0801 after every sector ($27
+; and $3D already advanced).  The program is stored in physical-sector order:
+; track 0 sectors 1-15, then track 1 sectors 0-15, and so on.
 ;
-; Build: cl65 -t none --start-addr 0x800 --asm-define NSECT=n --asm-define LOAD=0x900
+; Built once (cl65 -t none --start-addr 0x800); a2fs mkimage fills in the
+; parameter block at $0804 for each program, so no assembler is needed then.
 
         .setcpu "6502"
 
@@ -14,12 +15,16 @@ SLOT16  := $2B          ; PROM: boot slot * 16
 SECTOR  := $3D          ; PROM: physical sector wanted
 TRACK   := $41          ; PROM: track expected in the address field
 BASHIMEM:= $73          ; Applesoft HIMEM
-WAIT    := $FCA8        ; monitor delay
-.ifndef HIMEM
-HIMEM   = $9600         ; = __HIMEM__ in apple2-boot.cfg (--asm-define HIMEM=... to change)
-.endif
+WAIT    := $FCA8        ; monitor delay (the ROM is in at boot)
 
         .byte   1               ; the PROM loads just this sector, then JMP $0801
+        jmp     entry
+
+; parameter block at $0804, patched by a2fs mkimage
+nsect:  .byte   0               ; sectors to load
+load:   .word   $0900           ; load address (page aligned) = entry point
+himem:  .word   $9400           ; Applesoft HIMEM: cc65's crt0 puts the C stack there
+                                ;   when there is no ProDOS
 
 entry:  lda     started
         bne     next
@@ -34,13 +39,15 @@ entry:  lda     started
         lda     #0
         sta     BUFLO
         sta     TRACK
-        lda     #>LOAD
+        lda     load+1
         sta     BUFHI
-        lda     #1              ; first payload sector: track 0, sector 1
+        lda     #1              ; first program sector: track 0, sector 1
         sta     SECTOR
+        lda     nsect
         bne     read
+        beq     done            ; nothing to load
 
-next:   dec     left
+next:   dec     nsect
         beq     done
         lda     SECTOR
         cmp     #16
@@ -55,11 +62,11 @@ read:   ldx     SLOT16          ; the PROM reader indexes the slot with X
 
 done:   ldx     SLOT16
         lda     $C088,x         ; motor off
-        lda     #<HIMEM         ; without ProDOS, cc65's crt0 puts the C stack
-        sta     BASHIMEM        ; at Applesoft's HIMEM, never set when booting
-        lda     #>HIMEM         ; straight from disk
+        lda     himem
+        sta     BASHIMEM
+        lda     himem+1
         sta     BASHIMEM+1
-        jmp     LOAD
+        jmp     (load)
 
 ; one half-track outwards: next phase on, settle, previous phase off
 step:   inc     halft
@@ -83,4 +90,3 @@ phase:  and     #3              ; X = slot*16 + phase*2
 readv:  .word   $C05C
 started:.byte   0
 halft:  .byte   0               ; current half-track (track * 2)
-left:   .byte   NSECT
