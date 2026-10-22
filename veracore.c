@@ -1977,7 +1977,9 @@ video_write_reg(uint8_t reg, uint8_t value)
             vc_ien_writes++; vc_ien_last = ien; if(!(ien & 1)) vc_ien_disarms++;
             break;
         case 0x07:
-            isr &= value ^ 0xff; vc_isr_acks++;
+            /* top.v: a write clears only SPRCOL/LINE/VSYNC (bits 2:0); bits 7:4 are the
+               last frame's collision mask until the next VSYNC, bit 3 is the FIFO level */
+            isr &= ~(value & 0x07); vc_isr_acks++;
             break;
         case 0x08:
             irq_line = (irq_line & 0x100) | value;
