@@ -77,6 +77,9 @@ void vc_write(vc_t *v, int reg, uint8_t val);
  * Returns nonzero if IRQ line should be asserted. */
 int vc_tick(vc_t *v, int cycles);
 
+/* The frame as drawn so far, 640 x 480 pixels 0xAARRGGBB (A unused). */
+const uint32_t *vc_frame_pixels(void);
+
 /* Render current frame to framebuffer (call once per vsync) */
 void vc_render_frame(vc_t *v);
 

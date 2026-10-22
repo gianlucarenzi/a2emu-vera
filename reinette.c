@@ -181,9 +181,11 @@ int main(int argc, char *argv[]) {
 	a2_title_hook   = sdl_title;
 	vera_bus_init();                                                              // g_vera up, responds at $C400-$C41F
 	SDL_Window   *vwdo = SDL_CreateWindow("VERA [A2]", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, SDL_WINDOW_SHOWN);
-	SDL_Renderer *vrdr = SDL_CreateRenderer(vwdo, -1, SDL_RENDERER_SOFTWARE);
-	SDL_Texture  *vtex = SDL_CreateTexture(vrdr, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 480);
-	static uint32_t veraFB[640*480];
+	/* the GPU scales and shows it; the software renderer only if there is none */
+	SDL_Renderer *vrdr = SDL_CreateRenderer(vwdo, -1, SDL_RENDERER_ACCELERATED);
+	if (!vrdr) vrdr = SDL_CreateRenderer(vwdo, -1, SDL_RENDERER_SOFTWARE);
+	/* XRGB: veracore's pixels go up as they are (no alpha to add) */
+	SDL_Texture  *vtex = SDL_CreateTexture(vrdr, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, 640, 480);
 
 
 	//=================================================== SDL AUDIO INITIALIZATION
@@ -921,9 +923,7 @@ int main(int argc, char *argv[]) {
 		SDL_RenderPresent(rdr);                                                     // swap buffers
 
 		/* --- composite VERA's current VRAM+palette and show it --- */
-		vc_render_frame(&g_vera);
-		for (int vk = 0; vk < 640*480; vk++) veraFB[vk] = 0xFF000000u | g_vera.framebuffer[vk];
-		SDL_UpdateTexture(vtex, NULL, veraFB, 640*4);
+		SDL_UpdateTexture(vtex, NULL, vc_frame_pixels(), 640*4);
 		SDL_RenderClear(vrdr);
 		SDL_RenderCopy(vrdr, vtex, NULL, NULL);
 		SDL_RenderPresent(vrdr);

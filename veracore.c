@@ -503,6 +503,27 @@ uint8_t vc_dbg_ctrl(void) { return (uint8_t)((io_dcsel << 1) | io_addrsel); }
 uint8_t vc_dbg_layer(int l, int r) { return reg_layer[l & 1][r % 7]; }
 
 static uint8_t layer_line[2][SCREEN_WIDTH];
+
+/* The layer and sprite line buffers are built at a line change from the VRAM
+ * and the registers.  Two shortcuts, with the same picture:
+ *  - a tile layer is decoded only as far as the composer reads it with the
+ *    HSCALE / HSTART / HSTOP of the build (320 of 640 pixels at 2x), up to
+ *    layer_w[]; the first register write after the build (which may change
+ *    them, or the VRAM and the layer registers) completes the line first;
+ *  - an output line that shows the same source line as the line before
+ *    (VSCALE < 128), with no register write in between, keeps the buffers.
+ * vc_wver counts the writes that can change what a line shows. */
+static unsigned vc_wver;
+static int      layer_w[2];             /* layer_line[l][0..layer_w[l]-1] valid */
+static int      line_built_y = -1;      /* the source line in the buffers, -1 none */
+static unsigned line_built_wver;
+static uint8_t  line_built_en;
+/* the output line composed last in one go (VGA), for the copy of a line that
+ * shows the same source line with nothing written in between */
+static int      comp_y = -1;
+static unsigned comp_wver;
+static int      comp_src;
+static int      line_src;               /* the source line of the current output line */
 static uint8_t sprite_line_col[SCREEN_WIDTH];
 static uint8_t sprite_line_z[SCREEN_WIDTH];
 static uint8_t sprite_line_mask[SCREEN_WIDTH];
@@ -1100,6 +1121,9 @@ video_reset(void)
     /* Fill VRAM with random data (matches real hardware) */
     for (int i = 0; i < 128 * 1024; i++)
         video_ram[i] = rand();
+    line_built_y = -1;
+    comp_y = -1;
+    layer_w[0] = layer_w[1] = SCREEN_WIDTH;
 
     sprite_line_collisions = 0;
 
@@ -1288,7 +1312,7 @@ render_layer_line_text(uint8_t layer, uint16_t y)
  * ================================================================ */
 
 static void
-render_layer_line_tile(uint8_t layer, uint16_t y)
+render_layer_line_tile(uint8_t layer, uint16_t y, int x0, int x1)
 {
     const struct video_layer_properties *props = &layer_properties[layer];   /* at the line change */
     const struct video_layer_properties *props0 = props;
@@ -1316,7 +1340,7 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
     int8_t   color_shift_incr;
 
     {
-        const int eff_x = calc_layer_eff_x(props, 0);
+        const int eff_x = calc_layer_eff_x(props, x0);
         const uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
         const uint8_t byte0 = tile_bytes[map_addr];
         const uint8_t byte1 = tile_bytes[map_addr + 1];
@@ -1344,7 +1368,7 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
         s = video_space_read(props->tile_base + tile_offset);
     }
 
-    for (int x = 0; x < SCREEN_WIDTH; x++) {
+    for (int x = x0; x < x1; x++) {
         const int eff_x = calc_layer_eff_x(props, x);
 
         if ((eff_x & max_pixels_per_byte) == 0) {
@@ -1485,9 +1509,23 @@ render_line(uint16_t y, float scan_pos_x)
         }
 
         uint16_t ly = ((dc_video & 8) && (dc_video & 3) > 1) ? (y & 0xfffe) : y;
-        if (ly < SCREEN_HEIGHT) {
-            uint16_t eff_y = (eff_y_fp >> 16);
-            if (eff_y >= 480) eff_y = 480 - (ly & 1);
+        uint16_t eff_y = (eff_y_fp >> 16);
+        if (eff_y >= 480) eff_y = 480 - (ly & 1);
+        line_src = eff_y;
+        if (ly < SCREEN_HEIGHT && eff_y == line_built_y && vc_wver == line_built_wver
+            && (dc_video & 0x70) == line_built_en) {
+            /* the same source line as the line before, nothing written: as built */
+        } else if (ly < SCREEN_HEIGHT) {
+            /* the layer pixels the composer reads: eff_x = n * HSCALE / 128 for
+               the n-th pixel from HSTART */
+            int hs = reg_composer[4] << 2, he = reg_composer[5] << 2, need = 0;
+            if (he > SCREEN_WIDTH) he = SCREEN_WIDTH;
+            if (he > hs)
+                need = (int)((((uint32_t)(he - hs - 1) * reg_composer[1]) << 9) >> 16) + 2;
+            if (need > SCREEN_WIDTH) need = SCREEN_WIDTH;
+            line_built_y = eff_y;
+            line_built_wver = vc_wver;
+            line_built_en = dc_video & 0x70;
 
             if (dc_video & 0x40) {
                 render_sprite_line(eff_y);
@@ -1497,14 +1535,17 @@ render_line(uint16_t y, float scan_pos_x)
                 memset(sprite_line_mask, 0, sizeof sprite_line_mask);
             }
             for (uint8_t layer = 0; layer < 2; layer++) {
+                layer_w[layer] = SCREEN_WIDTH;
                 if (!(dc_video & (0x10 << layer)))
                     memset(layer_line[layer], 0, sizeof layer_line[layer]);  /* no fetches */
                 else if (layer_properties[layer].text_mode)
                     render_layer_line_text(layer, eff_y);
                 else if (layer_properties[layer].bitmap_mode)
                     render_layer_line_bitmap(layer, eff_y);
-                else
-                    render_layer_line_tile(layer, eff_y);
+                else {
+                    render_layer_line_tile(layer, eff_y, 0, need);
+                    layer_w[layer] = need;
+                }
             }
         }
     }
@@ -1526,6 +1567,25 @@ render_line(uint16_t y, float scan_pos_x)
         eff_x_fp = 0;
 
     uint8_t out_mode = reg_composer[0] & 3;
+
+    /* VGA, the whole line now, the same source line as the line above composed
+       in one go, nothing written since: the same pixels */
+    const bool whole = s_pos_x_p == 0 && s_pos_x == SCREEN_WIDTH && out_mode == 1;
+    if (whole && comp_y >= 0 && comp_y == y - 1 && comp_wver == vc_wver && comp_src == line_src
+        && y >= vstart && y < vstop && comp_y >= vstart) {
+        uint32_t *fb = (uint32_t *)framebuffer + y * SCREEN_WIDTH;
+        memcpy(fb, fb - SCREEN_WIDTH, SCREEN_WIDTH * sizeof *fb);
+        comp_y = y;
+        s_pos_x_p = s_pos_x;
+        return;
+    }
+    if (whole) {
+        comp_y = y;
+        comp_wver = vc_wver;
+        comp_src = line_src;
+    } else if (s_pos_x > s_pos_x_p) {           /* a part of a line: not reusable */
+        comp_y = -1;
+    }
     uint8_t border_color = reg_composer[3];
     uint16_t hstart = reg_composer[4] << 2;
     uint16_t hstop = reg_composer[5] << 2;
@@ -1547,10 +1607,16 @@ render_line(uint16_t y, float scan_pos_x)
                 col_line[x] = border_color;
 
             const uint32_t scale = reg_composer[1];
+            int last_x = -1;                    /* HSCALE < 128: a source pixel shows */
+            uint8_t last_col = 0;               /* on several pixels, mixed once */
             for (uint16_t x = MAX(hstart, s_pos_x_p); x < hstop && x < s_pos_x; ++x) {
                 uint16_t eff_x = eff_x_fp >> 16;
-                col_line[x] = (eff_x < SCREEN_WIDTH) ? calculate_line_col_index(en_spr ? sprite_line_z[eff_x] : 0, sprite_line_col[eff_x],
+                if (eff_x != last_x) {
+                    last_x = eff_x;
+                    last_col = (eff_x < SCREEN_WIDTH) ? calculate_line_col_index(en_spr ? sprite_line_z[eff_x] : 0, sprite_line_col[eff_x],
                                                                                 en_l0 ? layer_line[0][eff_x] : 0, en_l1 ? layer_line[1][eff_x] : 0) : 0;
+                }
+                col_line[x] = last_col;
                 eff_x_fp += (scale << 9);
             }
             for (uint16_t x = hstop; x < s_pos_x; ++x)
@@ -1838,9 +1904,26 @@ video_midline(void)
     }
 }
 
+/* before a register write: the tile layers of the line in the buffers to their
+   full width, from the VRAM and registers they were built from (unchanged
+   until this write), and the buffers no longer reusable */
+static void
+line_buffers_complete(void)
+{
+    for (uint8_t layer = 0; layer < 2; layer++)
+        if (layer_w[layer] < SCREEN_WIDTH) {
+            render_layer_line_tile(layer, line_built_y, layer_w[layer], SCREEN_WIDTH);
+            layer_w[layer] = SCREEN_WIDTH;
+        }
+    vc_wver++;
+}
+
 static void
 video_write_reg(uint8_t reg, uint8_t value)
 {
+    /* ADDR (0-2) and the IRQ registers (6-8) change nothing a line shows */
+    if ((reg & 0x1F) > 2 && ((reg & 0x1F) < 6 || (reg & 0x1F) > 8))
+        line_buffers_complete();
     switch (reg & 0x1F) {
         case 0x00:
             if (fx_2bit_poly && fx_4bit_mode && fx_addr1_mode == 2 && io_addrsel == 1) {
@@ -2221,6 +2304,13 @@ int vc_tick(vc_t *v, int cycles)
     return v->irq_out;
 }
 
+/* the pixels as drawn so far (0xAARRGGBB, A unused), 640 x 480: a frontend
+   uploads them as they are, without vc_render_frame's copy */
+const uint32_t *vc_frame_pixels(void)
+{
+    return (const uint32_t *)framebuffer;
+}
+
 void vc_render_frame(vc_t *v)
 {
     if (!v->framebuffer) return;
@@ -2258,7 +2348,7 @@ uint8_t *vc_vram(void) { return video_ram; }
    NES->VERA setup can load a palette without driving the DATA port byte-by-byte.
    Caller must mark it dirty via vc_palette_dirty(). */
 uint8_t *vc_palette(void) { return palette; }
-void vc_palette_dirty(void) { video_palette.dirty = true; }
+void vc_palette_dirty(void) { video_palette.dirty = true; comp_y = -1; }
 
 /* write a PSG register (reg = voice*4 + field) straight into the synth
    state, bypassing the DATA-port path. */
@@ -2270,6 +2360,7 @@ void vc_set_sprite(int idx, const uint8_t *b8)
 {
     int i;
     if (idx < 0 || idx >= 128) return;
+    line_buffers_complete();
     for (i = 0; i < 8; i++) sprite_data[idx][i] = b8[i];
     refresh_sprite_properties((uint16_t)idx);
 }
