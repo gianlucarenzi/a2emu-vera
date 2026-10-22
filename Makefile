@@ -35,7 +35,8 @@ install: a2emu a2run
 	mkdir -p $(DATADIR)/assets $(BINDIR)
 	install -m755 a2emu a2run $(DATADIR)/
 	install -m644 assets/*.bmp $(DATADIR)/assets/
-	if [ -d rom ]; then mkdir -p $(DATADIR)/rom && install -m644 rom/* $(DATADIR)/rom/; \
+	if [ -d rom ] && [ rom -ef $(DATADIR)/rom ]; then :; \
+	elif [ -d rom ]; then mkdir -p $(DATADIR)/rom && install -m644 rom/* $(DATADIR)/rom/; \
 	else echo "note: no rom/ here, put the Apple ROMs in $(DATADIR)/rom"; fi
 	for s in a2emu a2run; do \
 	  sed 's|@DATADIR@|$(DATADIR)|' scripts/$$s.in > $(BINDIR)/$$s && chmod 755 $(BINDIR)/$$s; done
