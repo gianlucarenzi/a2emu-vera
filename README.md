@@ -88,7 +88,7 @@ What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera 
 | IIe video | TEXT drawn with the IIe video ROM (lowercase, inverse, MouseText); 80-column TEXT from aux memory, 80STORE keeps page 1 on screen | 8e869a4, 4187b00 |
 | IIe aux memory | `--aux` / `A2_AUX` = `0`, `64K`, `512K`, `1M`, `4M`, `8M`: extended 80-column card or RamWorks III banking at `$C071`-`$C077` | ed1ff1e, 7d7d653 |
 | RAM2E II | `--aux RAM2E`: Garrett's Workshop RAM2E II after its HDL -- command sequence, detection, capacity mask, LED, settings saved in `ram2e.nvm`; GWRAM.SYSTEM works | 7d7d653 |
-| IIe double-res | Double hi-res and double lo-res when DHIRES (`$C05E`), 80COL and an aux card are on; colours as MAME; `examples/dblres` | (pending) |
+| IIe double-res | Double hi-res and double lo-res when DHIRES (`$C05E`), 80COL and an aux card are on; colours as MAME; `examples/dblres` | 4c14713 |
 | Disk II | Timed disk model: a write starts on the next nibble, not the one just read | 7943cab |
 | VERA | Line buffers, SCANLINE, VSTART and sprite timing per the 48.0.1 HDL; audio on VERA time, IRQ per instruction, mid-line raster effects; ISR write clears bits 2:0 only; SPI per `spictrl.v` with an SD card image; 16-bit PCM fixed | 17e1791, 92f4bd4, 484a5c6, 1aa0e1e |
 | VERA slot | Configurable slot (`A2_VERA_SLOT`, `--vera-slot`); runtime slot detection for programs, robust against the hard disk and the floating bus | cd7ba20, 2c17344, f96c473, 2517f88, 40c0870 |
