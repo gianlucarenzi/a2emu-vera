@@ -18,10 +18,16 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
   `a2run` takes `--aux 64` for the same.
   Aux memory size: `./a2emu --aux SIZE disk.po` (overrides `A2_AUX`; `a2run --aux SIZE`), SIZE =
-  `0`, `64K` (extended 80-column card), `512K`, `1M`, `4M` or `8M`.  512K-8M fit a RamWorks
-  III-compatible card (8M = RAM2E II): a write to `$C073` selects the 64 KB aux bank, reset selects
-  bank 0, the 80-column screen always shows bank 0.  The RAM2E's own configuration commands are not
-  emulated.  E.g. `A2_MODEL=iiee scripts/a2emu-vera --aux 8M disk.po`.
+  `0`, `64K` (extended 80-column card), `512K`, `1M`, `4M`, `8M` or `RAM2E`.  512K-8M fit a RamWorks
+  III-compatible card: a write to `$C071`/`$C073`/`$C075`/`$C077` selects the 64 KB aux bank, reset
+  selects bank 0, the 80-column screen always shows bank 0.
+  `RAM2E` is Garrett's Workshop's RAM2E II (GW4203, 8 MB, MAX CPLD version), modelled on its HDL:
+  besides the bank register it takes the command sequence (`FF 00 55 AA C1 AD` command argument
+  on the bank register) for chip/LED/revision detection, the capacity mask, the LED and saving the
+  settings, and it has no reset line (bank and settings survive a reset).  Its utility
+  `GWRAM.SYSTEM` works: capacity, LED, Apple+number to save, R x25 to erase.  The saved settings go
+  to `ram2e.nvm` next to `rom/` (`A2_RAM2E_NVM=FILE`; `a2run --ram2e-nvm FILE`, default: not saved).
+  E.g. `A2_MODEL=iiee scripts/a2emu-vera --aux RAM2E GWRAM.po`.
 - VERA slot: `A2_VERA_SLOT=<1-7>` (default 4; `a2run --vera-slot N`), e.g. `A2_VERA_SLOT=5 ./a2emu disk.po`
   puts the card at $C500-$C51F.  Slot 6 always holds the Disk II and slot 7 the hard disk when one is
   inserted: their firmware wins the reads there, so the emulator warns that the VERA is unreachable.

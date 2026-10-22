@@ -200,11 +200,13 @@ bool LCWFF = false;                                                             
  * there is no aux RAM: aux reads return $FF, aux writes are lost, ALTZP does nothing
  * (on a real machine it would map in floating bus) -- so aux-detection code (ProDOS's
  * /RAM) correctly finds none.
- * RamWorks III-style card (g_iie_aux = 2-128 banks of 64 KB, up to 8 MB like the
- * RAM2E II): a write to $C073 selects the aux bank (bits 0-6, modulo the banks fitted)
+ * RamWorks III-style card (g_iie_aux = 2-128 banks of 64 KB, up to 8 MB): a write to
+ * $C071/$C073/$C075/$C077 selects the aux bank (bits 0-6, modulo the banks fitted)
  * that RAMRD/RAMWRT/80STORE/ALTZP map in; reset selects bank 0.  The 80-column video
- * always shows bank 0, as on the RamWorks.  The RAM2E's own configuration commands
- * are not modelled.
+ * always shows bank 0, as on the RamWorks.
+ * RAM2E II (g_ram2e, 8 MB): the same register plus its configuration commands, after
+ * Garrett's Workshop's HDL (RAM2E.v, UFM-MAX.v; see ram2e_write()).  It has no reset
+ * line, so its bank, capacity mask and LED setting survive a reset.
  * Not modelled: double-res VIDEO (the frontend draws 40/80-column TEXT only),
  * snapshots of the IIe state, the IIe keyboard's auto-repeat. */
 int      g_iie = 0;
@@ -217,6 +219,7 @@ static struct auxbank auxbank0;        /* banks 1.. are allocated at the first s
 static struct auxbank *auxbanks;
 static int auxbank_cur = 0;
 static uint8_t *aux = auxbank0.ram, *auxlgc = auxbank0.lgc, *auxbk2 = auxbank0.bk2;
+int      g_ram2e = 0;                  /* 1 = the aux card is a RAM2E II */
 bool S80STORE = false, RAMRD = false, RAMWRT = false, ALTZP = false;
 bool INTCXROM = false, SLOTC3ROM = false, S80COL = false, ALTCHAR = false;
 
@@ -234,11 +237,15 @@ static inline uint8_t *iie_bank(uint16_t a, int write) {
 }
 const uint8_t *a2_aux_ram(void) { return g_iie_aux ? auxbank0.ram : NULL; }   /* for 80-column video */
 /* aux memory size: "0" (none), "64K" (extended 80-column card), "512K", "1M", "4M",
- * "8M" (RamWorks-style).  K/KB/M/MB in either case; a bare number is in KB, so the
- * old "64" still works.  Returns 0 (and leaves g_iie_aux alone) on any other value. */
+ * "8M" (RamWorks-style), "RAM2E" (RAM2E II: 8 MB + its commands).  K/KB/M/MB in either
+ * case; a bare number is in KB, so the old "64" still works.  Returns 0 (and leaves
+ * g_iie_aux alone) on any other value. */
 int a2_set_aux(const char *s) {
 	static const int ok[] = { 0, 64, 512, 1024, 4096, 8192 };
 	if (!s || !*s) s = "0";
+	const char *r = s, *w = "ram2e";
+	while (*r && (*r | 0x20) == *w) r++, w++;
+	if (!*r && !*w) { g_iie_aux = 128; g_ram2e = 1; return 1; }
 	char *e; long n = strtol(s, &e, 10);
 	if (e == s || n < 0) return 0;
 	if (*e == 'M' || *e == 'm' || *e == 'K' || *e == 'k') {
@@ -247,8 +254,68 @@ int a2_set_aux(const char *s) {
 	}
 	if (*e) return 0;
 	for (unsigned i = 0; i < sizeof ok / sizeof ok[0]; i++)
-		if (n == ok[i]) { g_iie_aux = (int)(n / 64); return 1; }
+		if (n == ok[i]) { g_iie_aux = (int)(n / 64); g_ram2e = 0; return 1; }
 	return 0;
+}
+
+/* RAM2E II command logic (RAM2E.v + UFM-MAX.v, Altera MAX version = chip type $FF).
+ * Every write to the bank register also goes through here:
+ *   - the sequence FF 00 55 AA C1 AD advances CS 0..6, any other byte drops it to 0;
+ *     8 or more CPU cycles with no register write in between also drop it to 0;
+ *   - the byte written at CS 6 is the command, the next write (CS 7) its argument;
+ *   - the bank latched is the byte AND the capacity mask, except right after the
+ *     commands FF (MAX chip detect), F0 (LED present), F1 (rev. C) and E3 (LED get,
+ *     only if the LED is enabled): then it is $FF, which detection software reads back;
+ *   - E0 arg: capacity mask = arg;  E2 arg: LED enable = arg bit 0;
+ *   - EA arg: UFM bitbang, bit 7 = clock in bit 6 (the 16-bit data register, MSB first);
+ *     EE: erase the settings, EF: program the data register.  Erase/program work once
+ *     per power-on, as in the HDL.  The settings word is: mask (8 bits, $80 = $FF), LED
+ *     bit (LED = bit ^ mask bit 7), seven 1s; $FFFF = erased.  It is kept in the file
+ *     a2_ram2e_nvm() names (2 bytes, big endian), if any. */
+static uint8_t  ram2e_mask = 0x7F, ram2e_led = 0, ram2e_cs = 0, ram2e_cmd = 0;
+static int      ram2e_ufm_used = 0;
+static uint16_t ram2e_ufmd = 0xFFFF;
+static unsigned ram2e_last;            /* ticks of the last register write */
+static char     ram2e_nvm_path[1024];
+static void ram2e_load_word(uint16_t w) {  /* the power-on UFM scan: erased = keep defaults */
+	uint8_t m = (uint8_t)(w >> 8), b = (w >> 7) & 1;
+	if (m == 0xFF && b) return;
+	ram2e_mask = m == 0x80 ? 0xFF : m;
+	ram2e_led = b ^ (m >> 7);
+}
+static void ram2e_save_word(uint16_t w) {
+	if (!ram2e_nvm_path[0]) return;
+	FILE *f = fopen(ram2e_nvm_path, "wb");
+	if (!f) { fprintf(stderr, "a2emu: RAM2E settings: can't write %s\n", ram2e_nvm_path); return; }
+	fputc(w >> 8, f); fputc(w & 0xFF, f); fclose(f);
+}
+void a2_ram2e_nvm(const char *path) {          /* power-on: load the saved settings */
+	snprintf(ram2e_nvm_path, sizeof ram2e_nvm_path, "%s", path ? path : "");
+	FILE *f = path ? fopen(path, "rb") : NULL;
+	if (!f) return;
+	int hi = fgetc(f), lo = fgetc(f);
+	fclose(f);
+	if (hi >= 0 && lo >= 0) ram2e_load_word((uint16_t)(hi << 8 | lo));
+}
+static uint8_t ram2e_write(uint8_t v) {       /* returns the bank latched */
+	static const uint8_t seq[6] = { 0xFF, 0x00, 0x55, 0xAA, 0xC1, 0xAD };
+	if (ticks - ram2e_last >= 9) ram2e_cs = 0;  /* >= 8 cycles without a register write */
+	ram2e_last = ticks;
+	uint8_t c = ram2e_cmd, bank;
+	bank = (c == 0xFF || c == 0xF0 || c == 0xF1 || (c == 0xE3 && ram2e_led)) ? 0xFF : v & ram2e_mask;
+	if (c == 0xE0) ram2e_mask = v;
+	else if (c == 0xE2) ram2e_led = v & 1;
+	else if (c == 0xEA && (v & 0x80)) ram2e_ufmd = (uint16_t)(ram2e_ufmd << 1 | ((v >> 6) & 1));
+	ram2e_cmd = 0;
+	if (ram2e_cs == 6) {
+		ram2e_cmd = v;
+		if (!ram2e_ufm_used && (v == 0xEE || v == 0xEF)) {
+			ram2e_ufm_used = 1;
+			ram2e_save_word(v == 0xEF ? ram2e_ufmd : 0xFFFF);
+		}
+	}
+	ram2e_cs = (ram2e_cs >= 6 || v == seq[ram2e_cs]) ? (uint8_t)((ram2e_cs + 1) & 7) : 0;
+	return bank;
 }
 static void iie_update_memslow(void) { g_memslow = g_iie && (RAMRD || RAMWRT || S80STORE); }
 
@@ -1094,7 +1161,9 @@ uint8_t softSwitches(uint16_t address, uint8_t value, bool WRT) {
   	case 0xC067: return readPaddle(3);                                          // Paddle 3
 
   	case 0xC070: resetPaddles(); break;                                         // paddle timer RST
-  	case 0xC073: if (WRT && iie_set_auxbank(value)) fetchSyncAll(); break;      // RamWorks aux bank
+  	case 0xC071: case 0xC073: case 0xC075: case 0xC077:                         // RamWorks aux bank
+  		if (WRT && g_iie_aux >= 2 && iie_set_auxbank(g_ram2e ? ram2e_write(value) : value)) fetchSyncAll();
+  		break;
 
     case 0xC080:                                                      // LANGUAGE CARD :
   	case 0xC084: LCBK2 = 1; LCRD = 1; LCWR = 0;      LCWFF = 0;    break;       // LC2RD
@@ -1305,7 +1374,7 @@ void writeMemSlow(uint16_t address, uint8_t value) {
  * language-card state (a II+ with LC RAM mapped takes RESET through $FFFC in RAM). */
 void a2_reset(void) {
 	if (g_iie) {
-		iie_set_auxbank(0);
+		if (!g_ram2e) iie_set_auxbank(0);             /* the RAM2E has no reset line */
 		iie_set_altzp(false);
 		S80STORE = RAMRD = RAMWRT = INTCXROM = SLOTC3ROM = S80COL = ALTCHAR = false;
 		LCRD = false; LCBK2 = true; LCWR = true; LCWFF = false;

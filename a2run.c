@@ -8,7 +8,9 @@
  *                           65C02; phantom model 65c02 unless --phantom says otherwise)
  *     --aux SIZE            IIe aux memory: 0 = none (default, the "non-extended" IIe: plan
  *                           A-D2 baseline), 64K = extended 80-column card, 512K | 1M | 4M |
- *                           8M = RamWorks III-style card banked at $C073 (8M = RAM2E II)
+ *                           8M = RamWorks III-style card banked at $C073, RAM2E = RAM2E II
+ *                           (8 MB + its configuration commands)
+ *     --ram2e-nvm F         file for the RAM2E's saved settings (default: none, not saved)
  *     --disk1 F --disk2 F   Disk ][ images (.dsk/.do DOS order, .po ProDOS order, .nib), slot 6;
  *                           written back to their files at exit (E6) unless --no-writeback
  *     --hd F                ProDOS block device in slot 7 (.po/.hdv/.2mg, up to 32 MB): boots first
@@ -219,7 +221,7 @@ int main(int argc, char **argv) {
 	int ym_opt = -1; FILE *ymlog = NULL; int zpmin = -1; unsigned zpmin_v = 0xFFFF, zpmin_lo = 0x0800, zpmin_top = 0; int zpmin_arm = 1;
 	const char *zpenv = getenv("A2_ZPMIN");             /* --zpmin default (gates) */
 	int keys_at = 60, want_text = 0, quiet = 0, model = 0, phantom_given = 0;
-	const char *aux = NULL;
+	const char *aux = NULL, *ram2e_nvm = NULL;
 	const char *input = NULL; int snesmax = -1;
 
 	for (int i = 1; i < argc; i++) {
@@ -239,6 +241,7 @@ int main(int argc, char **argv) {
 		else if (!strcmp(a, "--vera-irq"))    vera_irq = strcmp(ARG, "off") != 0;
 		else if (!strcmp(a, "--phantom"))     { const char *m = ARG; phantom = !strcmp(m, "off") ? 0 : !strcmp(m, "65c02") ? 3 : 1; phantom_given = 1; }
 		else if (!strcmp(a, "--aux"))         aux = ARG;
+		else if (!strcmp(a, "--ram2e-nvm"))   ram2e_nvm = ARG;
 		else if (!strcmp(a, "--model"))       { const char *m = ARG; model = !strcmp(m, "iie") ? 1 : !strcmp(m, "iiee") ? 2 : 0;
 		                                        if (!model && strcmp(m, "ii+")) { fprintf(stderr, "a2run: --model ii+|iie|iiee\n"); return 2; } }
 		else if (!strcmp(a, "--xmem"))        xmem_kb = atoi(ARG);
@@ -277,8 +280,9 @@ int main(int argc, char **argv) {
 	if (model && !a2_load_iie_roms(romdir, model == 2)) {
 		fprintf(stderr, "a2run: IIe ROMs not found in %s (342-030x / 342-013x)\n", romdir); return 2; }
 	if (model == 2) { g_cpu = 2; if (!phantom_given) phantom = 3; }   /* CPU_65C02, PH_65C02 */
-	if (!a2_set_aux(aux)) { fprintf(stderr, "a2run: --aux %s: use 0, 64K, 512K, 1M, 4M or 8M\n", aux); return 2; }
-	if (!model) g_iie_aux = 0;                        /* the ][+ has no aux slot */
+	if (!a2_set_aux(aux)) { fprintf(stderr, "a2run: --aux %s: use 0, 64K, 512K, 1M, 4M, 8M or RAM2E\n", aux); return 2; }
+	if (!model) g_iie_aux = g_ram2e = 0;              /* the ][+ has no aux slot */
+	if (g_ram2e) a2_ram2e_nvm(ram2e_nvm);
 	if (zpmin < 0 && zpenv) {
 		char *e; zpmin = (int)strtol(zpenv, &e, 0) & 0xFF;
 		if (*e == ',') zpmin_lo = (unsigned)strtol(e + 1, &e, 0);

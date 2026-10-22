@@ -348,9 +348,15 @@ int main(int argc, char *argv[]) {
 		}
 		if (!strcmp(model, "iiee")) g_cpu = 2;                                    // 65C02
 		if (!a2_set_aux(auxArg ? auxArg : getenv("A2_AUX"))) {                   // --aux / A2_AUX: 64K = 80-col card,
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal error",          //   512K..8M = RamWorks ($C073)
-				"aux memory (--aux / A2_AUX): use 0, 64K, 512K, 1M, 4M or 8M", NULL);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal error",          //   512K..8M = RamWorks ($C073),
+				"aux memory (--aux / A2_AUX): use 0, 64K, 512K, 1M, 4M, 8M or RAM2E", NULL);   //   RAM2E = RAM2E II
 			return 1;
+		}
+		if (g_ram2e) {                                                            // its saved settings: A2_RAM2E_NVM,
+			const char *nvm = getenv("A2_RAM2E_NVM");                               //   default ram2e.nvm next to rom/
+			char path[1100];
+			if (!nvm) { snprintf(path, sizeof path, "%.*sram2e.nvm", workDirSize, workDir); nvm = path; }
+			a2_ram2e_nvm(nvm);
 		}
 		SDL_SetWindowTitle(wdo, a2_model_name());
 

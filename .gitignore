@@ -11,3 +11,4 @@ examples/*/*.img
 /a2emu.exe
 examples/*/*.png
 !examples/vera/font*.bin
+/ram2e.nvm

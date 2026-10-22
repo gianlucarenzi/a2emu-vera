@@ -105,7 +105,9 @@ extern bool S80STORE, RAMRD, RAMWRT, ALTZP, INTCXROM, SLOTC3ROM, S80COL, ALTCHAR
 int  a2_load_iie_roms(const char *dir, int enhanced);   // 1 = loaded, IIe mode on
 int  a2_load_iie_video_rom(const char *dir, int enhanced, uint8_t *buf);   // 2 KB charset, 1 = loaded
 const uint8_t *a2_aux_ram(void);            // aux bank 0 (the video one), NULL without aux memory
-int  a2_set_aux(const char *s);             // aux memory 0|64K|512K|1M|4M|8M; 0 = invalid size
+int  a2_set_aux(const char *s);             // aux memory 0|64K|512K|1M|4M|8M|RAM2E; 0 = invalid
+extern int g_ram2e;                         // 1 = the aux card is a RAM2E II
+void a2_ram2e_nvm(const char *path);        // RAM2E settings file (NULL = not saved): loads it
 void a2_reset(void);                        // machine reset (IIe: switches + LC to ROM)
 
 // frontend hooks (NULL = not provided)
