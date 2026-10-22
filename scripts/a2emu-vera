@@ -1,38 +1,29 @@
 #!/bin/bash
-# a2emu-vera launcher wrapper: starts a2emu and automatically positions windows.
-# Windows are positioned using wmctrl: a2emu (Reinette) TOP-LEFT, VERA BOTTOM-RIGHT.
-# The mouse cursor is hidden by a2emu itself.
+# a2emu-vera: start this tree's a2emu and place its windows with the window
+# manager (a2emu-vera-windows): Apple II TOP-LEFT, VERA BOTTOM-RIGHT.
 #
-# Usage: a2emu-vera [a2emu-options]
-# Example: a2emu-vera disk.po
-#          A2_MODEL=iiee a2emu-vera --aux 64 disk.po
+# Usage: a2emu-vera [a2emu-options] [disk]
+# Example: a2emu-vera disk.dsk
+#          A2_MODEL=iiee A2_AUX=64 a2emu-vera disk.dsk
+#          A2_VERA_SLOT=5 a2emu-vera disk.dsk
 
-set -e
-
-# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 A2EMU_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Save the current directory for relative paths
-WORK_DIR="$PWD"
-
-# Convert relative arguments to absolute paths
+# a2emu loads rom/ and assets/ from the current directory: make the file
+# arguments absolute, then run it from the tree
 declare -a ARGS
 for arg in "$@"; do
     case $arg in
         /*|-*) ARGS+=("$arg") ;;
-        *) [ -e "$arg" ] && ARGS+=("$WORK_DIR/$arg") || ARGS+=("$arg") ;;
+        *) if [ -e "$arg" ]; then ARGS+=("$PWD/$arg"); else ARGS+=("$arg"); fi ;;
     esac
 done
 
-# Change to a2emu directory and start a2emu in background
-cd "$A2EMU_DIR"
-"$A2EMU_DIR/a2emu" "${ARGS[@]}" &
+cd "$A2EMU_DIR" || exit 1
+./a2emu "${ARGS[@]}" &
 A2EMU_PID=$!
 
-# Give a2emu time to create windows, then position them
-sleep 0.5
-"$SCRIPT_DIR/a2emu-vera-windows" || true
+"$SCRIPT_DIR/a2emu-vera-windows" --pid $A2EMU_PID || true
 
-# Wait for a2emu to finish
 wait $A2EMU_PID

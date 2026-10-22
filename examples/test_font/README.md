@@ -1,68 +1,22 @@
-# VERA Font/Graphics Display Test for Apple II
+# test_font -- every glyph of the VERA text font
 
-This is a port of the VERA font test from the C64 test suite. It fills the VERA framebuffer with various graphical patterns to test color rendering capabilities.
+Port of `VERA_C64/tests/test_font.c`.  Booted straight from the floppy (sdk/boot.s,
+no DOS), it finds the A2VERA card in any slot (`../vera/vera.c`), sets up a text
+console on the VERA layer 1 (`../vera/vtext.c`) and prints the 256 tile codes --
+128 glyphs, then the same in inverse video -- until a key is pressed.  The Apple
+screen shows the VERA version, its slot and the messages.
 
-## What It Does
+## Build and run
 
-The test fills the VERA 64KB framebuffer with three different patterns:
+    make                 # test_font.dsk, 80x30 (8x16 font)
+    make VT_MODE=4       # 40x30, 8x8 font scaled 2x
+    make VT_MODE=6       # 80x60, 8x8 font
+    make run             # boot it in a2emu (MODEL=plus for the ][+)
+    make test A2RUN="../../a2run --rom ../../rom"   # headless, VERA shot in test_font.png
 
-1. **Vertical Color Stripes** - Changes color every 256 bytes (every scanline)
-2. **Checkerboard Pattern** - Alternating black and white pixels
-3. **Diagonal Gradient** - Color gradually changes along diagonals
+Any slot: `A2_VERA_SLOT=5 a2emu test_font.dsk`.
 
-Each test fills the entire framebuffer and waits for you to press RETURN.
+## Font
 
-## Building
-
-```bash
-make
-```
-
-This creates `test_font.dsk` which can be run with a2emu.
-
-## Running
-
-```bash
-a2emu test_font.dsk
-```
-
-Or with a specific VERA slot:
-
-```bash
-A2_VERA_SLOT=5 a2emu test_font.dsk
-```
-
-## What to Expect
-
-If VERA rendering is working:
-- You should see colored patterns on the VERA window
-- The patterns should correspond to what's being written to VRAM
-- Each pattern should be visually distinct
-
-## Test Output
-
-The Apple II screen shows:
-- Detection of VERA card and which slot it's in
-- Progress bars (dots) while filling the framebuffer
-- Prompts to press RETURN between tests
-
-The VERA window should show the actual rendered patterns.
-
-## Notes
-
-This is a simplified version compared to the C64 test_font.c:
-- The C64 version used a text console (vtext.c) to display 256 glyphs
-- The Apple II version fills the framebuffer with graphics patterns instead
-- Both test the VERA rendering capabilities
-
-The test uses the vera_detect.h library for runtime slot detection, so it works regardless of which slot the emulator puts VERA in.
-
-## Porting From C64
-
-Original source: `~/Progetti-CVS/C64/VERA_C64/tests/test_font.c`
-
-Key differences:
-- C64 version: text mode, 256 glyphs (including inverse video)
-- Apple II version: framebuffer mode, graphics patterns
-- Both detect VERA at runtime
-- Both test rendering capabilities
+`../vera/font8x8.bin`, `../vera/font8x16.bin`: 128 glyphs in ASCII order, from
+VERA_C64 (`fonts/`, BSD 2-Clause), loaded at VRAM $1F000; tilemap 128x64 at $1B000.

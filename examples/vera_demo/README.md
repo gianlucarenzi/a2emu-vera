@@ -1,32 +1,16 @@
-# VERA Graphics Demo for Apple II
+# vera_demo -- a 320x240 bitmap in 256 colours
 
-A simple demo program that fills the VERA display with a gradient pattern.
+Booted straight from the floppy (no DOS), it finds the A2VERA card in any slot and:
 
-## Files
+- sets layer 0 to an 8 bpp bitmap at VRAM $00000 (`L0_CONFIG = $07`,
+  `L0_TILEBASE = $00`), scaled 2x (`HSCALE = VSCALE = $40`);
+- draws diagonal colour bands with a frame of colour 1 (76,800 bytes through
+  DATA0, increment 1) with the layer off, then enables it (`DC_VIDEO = $11`);
+- opens a 32-pixel border (DCSEL 1: HSTART/HSTOP/VSTART/VSTOP) and changes its
+  colour on every VERA frame.
 
-- `vera_demo.c`: Demo program that initializes VERA in graphics mode and fills VRAM
-- `Makefile`: Build rules for the demo
+## Build and run
 
-## Building
-
-```bash
-make           # Build vera_demo.dsk
-make test      # Run headless in a2run (Apple II screen only)
-make run       # Boot in a2emu (shows both Apple II and VERA screens)
-make clean     # Remove build artifacts
-```
-
-## Demo Details
-
-The program:
-1. Initializes VERA for 640x480 8-bit graphics mode
-2. Sets up a grayscale palette (256 shades)
-3. Fills all 64 KB of VERA VRAM with a XOR pattern
-4. Shows progress on the Apple II screen
-5. Returns when user presses RETURN
-
-## Output
-
-When run with `a2emu`:
-- **Apple II window**: Shows initialization progress and control instructions
-- **VERA window**: Displays the filled pattern in real-time
+    make
+    make run             # boot it in a2emu
+    make test A2RUN="../../a2run --rom ../../rom"   # headless, VERA shot in vera_demo.png

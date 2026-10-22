@@ -83,6 +83,7 @@ extern int  g_vera_enabled;
 extern int  g_vera_irq;                     // VERA IRQ -> 6502 /IRQ (A2VERA D1), default on
 void vera_bus_init(void);
 extern uint16_t g_vera_base;                // $Cn00 of the VERA card (A2_VERA_SLOT)
+void vera_slot_check(void);                 // warn when the slot is taken by the Disk II / hard disk
 void cpu_vera_step(void);                   // ~32 CPU cycles + VERA (59.52 Hz) + IRQ line
 
 // RAM card (Slinky, E5) and debug card (E7)

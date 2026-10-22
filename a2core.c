@@ -132,28 +132,7 @@ void vera_bus_init(void)
           g_cyareg = 0x80; g_a2_speed_permille = g_gs_fast_permille;
       } }
     { const char *e = getenv("A2_VERA_IRQ"); g_vera_irq = e ? atoi(e) : 1;
-      e = getenv("A2_VERA_SLOT");
-      int slot = 4;  /* default slot */
-      if (e && atoi(e) >= 1 && atoi(e) <= 7) {
-          slot = atoi(e);
-          /* Check for hard disk conflict */
-          if (g_hd_present && slot == 7) {
-              fprintf(stderr, "a2emu: warning: slot 7 requested but occupied by hard disk device\n");
-              fprintf(stderr, "a2emu: hard disk takes precedence, using slot 4 for VERA\n");
-              slot = 4;
-          }
-      } else {
-          /* Auto-detect: use slot 4 by default, but check for conflicts.
-             Slot 7 is used by the hard disk device. */
-          if (g_hd_present && slot == 7) {
-              fprintf(stderr, "a2emu: slot 7 is occupied by hard disk device, using slot 4 for VERA\n");
-              slot = 4;
-          }
-      }
-      g_vera_base = 0xC000 + slot * 0x100;
-      /* Notify the user of the slot assignment */
-      fprintf(stderr, "a2emu: VERA card in slot %d ($%04X)\n", slot, g_vera_base);
-    }
+      e = getenv("A2_VERA_SLOT"); if (e && atoi(e) >= 1 && atoi(e) <= 7) g_vera_base = 0xC000 + atoi(e) * 0x100; }
     vc_init(&g_vera);
     { const char *e = getenv("A2_SDCARD");                                       // SD card on the VERA's SPI
       if (e && *e && !sdcard_attach(e)) fprintf(stderr, "a2emu: cannot use SD card image %s\n", e); }
@@ -162,6 +141,7 @@ void vera_bus_init(void)
         g_vera.framebuffer = calloc((size_t)VC_SCREEN_W * VC_SCREEN_H, sizeof(uint32_t));
     }
     g_vera_enabled = 1;
+    vera_slot_check();
 }
 
 // memory layout
@@ -415,6 +395,16 @@ static unsigned hd_blocks = 0;
 static uint8_t  hd_cmd = 0, hd_unit = 0, hd_status = 0;
 static uint16_t hd_block = 0, hd_buf = 0;
 
+/* Two cards in one slot: slot 6 always holds the Disk II, slot 7 the hard disk when one is
+ * inserted; their firmware wins the reads of $Cnxx, so the VERA there is unreachable. */
+void vera_slot_check(void) {
+	if (!g_vera_enabled) return;
+	if (g_vera_base == SL6START)
+		fprintf(stderr, "a2emu: warning: slot 6 holds the Disk II, the VERA card there is unreachable\n");
+	if (g_hd_present && g_vera_base == SL7START)
+		fprintf(stderr, "a2emu: warning: the hard disk takes slot 7, the VERA card there is unreachable\n");
+}
+
 int insertHardDisk(char *filename) {
 	hd_ro = 0;
 	hd_file = fopen(filename, "r+b");                                             // try read/write
@@ -439,6 +429,7 @@ int insertHardDisk(char *filename) {
 	sl7[0xFC] = hd_blocks & 0xFF; sl7[0xFD] = hd_blocks >> 8;                    // block count
 	g_hd_present = 1;
 	memcpy(fetchMem + SL7START, sl7, sizeof sl7);
+	vera_slot_check();
 	return 1;
 }
 

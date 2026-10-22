@@ -1,192 +1,55 @@
-# VERA Slot Detection - Test Verification Report
+# VERA slot detection -- test report
 
-## Compilation Status
-✅ All programs compile successfully with no errors
+`examples/vera/vera.c` finds the A2VERA card at run time, so the same program works
+in any slot (`A2_VERA_SLOT=<1-7>` for a2emu, `--vera-slot N` for a2run).
 
-### memtest
-- Source: examples/memtest/memtest.c (3.2 KB)
-- Binary: examples/memtest/memtest.bin (4.6 KB)
-- Image: examples/memtest/memtest.dsk (140 KB)
+## Method
 
-### vera_demo
-- Source: examples/vera_demo/vera_demo.c (1.8 KB)
-- Binary: examples/vera_demo/vera_demo.bin (4.3 KB)
-- Image: examples/vera_demo/vera_demo.dsk (140 KB)
+For slots 1-7:
 
-### test_hd_conflict
-- Source: examples/test_hd_conflict.c (2.4 KB)
-- Binary: compiled to /tmp/test_hd.bin
-- Image: compiled to /tmp/test_hd.dsk
+1. Only reads first: a slot whose `$Cn01/$Cn03/$Cn05` read `$20/$00/$03` holds
+   disk-controller firmware (Disk II, ProDOS block devices) and is skipped, so
+   nothing is written to it.
+2. `CTRL = $7E` (DCSEL 63), then the identity bytes: `$Cn09 = 'V'` and
+   `$Cn0A` (major version) `>= 47`; `CTRL = 0` again.
+3. On a match `vera` points at `$Cn00`, `vera_slot = n`, ADDR is cleared.
 
----
+A write/read-back of ADDR_L (the first version) is not a valid probe: other cards
+and the floating bus can echo it, and it writes into every slot.
 
-## Code Review - memtest.c
+## Emulator side
 
-### Detection Logic ✅
-- Line 11: `#include "../vera_detect.h"` - includes detection library
-- Line 50: `slot = vera_detect()` - calls detection function
-- Line 57: `base = vera_get_base()` - retrieves base address
-- Lines 61-65: Initializes volatile pointers based on detected base
+The Disk II firmware always occupies slot 6, the hard disk's slot 7 once an image
+is inserted; their firmware wins the reads of `$Cnxx`.  a2emu/a2run warn:
 
-### VRAM Access ✅
-- Line 72-74: Writes pattern to VRAM via vera_data0
-- Line 87: Reads back VRAM data to verify
+    a2emu: warning: slot 6 holds the Disk II, the VERA card there is unreachable
+    a2emu: warning: the hard disk takes slot 7, the VERA card there is unreachable
 
-### Error Handling ✅
-- Line 51-55: Returns error if VERA not found
+## Results
 
----
+`examples/test_font/test_font.dsk` (first line of the Apple screen after 200
+frames), a2run, 2026-10-22:
 
-## Code Review - vera_demo.c
+| VERA slot | ][+ | IIe | enhanced IIe |
+|-----------|-----|-----|--------------|
+| 1 | found, slot 1 | found, slot 1 | found, slot 1 |
+| 2 | found, slot 2 | found, slot 2 | found, slot 2 |
+| 3 | found, slot 3 | found, slot 3 | found, slot 3 |
+| 4 (default) | found, slot 4 | found, slot 4 | found, slot 4 |
+| 5 | found, slot 5 | found, slot 5 | found, slot 5 |
+| 6 | not found (Disk II), warning | not found, warning | not found, warning |
+| 7 | found, slot 7 | found, slot 7 | found, slot 7 |
+| none (`--vera-slot 0`) | not found | not found | not found |
 
-### Detection Logic ✅
-- Line 7: `#include "../vera_detect.h"` - includes detection library
-- Line 53: `slot = vera_detect()` - calls detection function
-- Lines 14, 26: Uses `vera_get_base()` to access registers dynamically
+With a hard disk image (`--hd`): VERA in slot 4 found; VERA in slot 7 not found,
+with the warning.
 
-### Register Access ✅
-- Line 15-18: Writes to ADDR_L, ADDR_M, ADDR_H, CTRL using base offsets
-- Line 33: Writes to DATA0 (base + 3) to fill framebuffer
+The identity bytes read `'V'`, 48, 0, 1 (VERA 48.0.1).
 
-### Error Handling ✅
-- Line 54-59: Returns error if VERA not found
+## Reproduce
 
----
-
-## Code Review - vera_detect.h
-
-### Detection Algorithm ✅
-- Lines 49-74: Probes slots 1-7 in sequence
-- Lines 54-60: Test 1 with pattern 0xA5
-- Lines 65-73: Test 2 with pattern 0x5A (inverse)
-- Line 69-73: Confirms match and returns slot number
-- Line 76: Returns 0 if not found
-
-### Hard Disk Conflict Handling ✅
-- Documentation (lines 38-40): Explains that hard disk controllers
-  will fail the read/write test naturally
-- Test program (test_hd_conflict.c) verifies this behavior
-
-### Global State ✅
-- Line 25: `g_vera_base` global variable stores detected address
-- Lines 82-85: `vera_get_base()` provides access to detected address
-
----
-
-## Code Review - Emulator (a2core.c)
-
-### Environment Variable Handling ✅
-- Line 135: Reads `A2_VERA_SLOT` environment variable
-- Lines 137-144: Processes explicit slot with conflict checking
-
-### Hard Disk Conflict Detection ✅
-- Lines 140-144: Checks if slot 7 requested and hard disk present
-- Lines 148-151: Checks if default slot would conflict with hard disk
-- Warnings printed to stderr (lines 141-142, 149)
-
-### Base Address Calculation ✅
-- Line 153: Calculates g_vera_base = 0xC000 + slot * 0x100
-
-### User Notification ✅
-- Line 155: Prints actual slot assignment to stderr
-
----
-
-## Test Cases Verified
-
-### Test 1: Default Configuration (Slot 4)
-```bash
-$ ./a2emu examples/memtest/memtest.dsk
-a2emu: VERA card in slot 4 ($C400)
-```
-✅ PASS - Uses default slot 4
-
-### Test 2: Explicit Slot 5
-```bash
-$ A2_VERA_SLOT=5 ./a2emu examples/memtest/memtest.dsk
-a2emu: VERA card in slot 5 ($C500)
-```
-✅ PASS - Correctly places VERA in slot 5
-
-### Test 3: Explicit Slot 6
-```bash
-$ A2_VERA_SLOT=6 ./a2emu examples/memtest/memtest.dsk
-a2emu: VERA card in slot 6 ($C600)
-```
-✅ PASS - Correctly places VERA in slot 6
-
-### Test 4: Explicit Slot 7
-```bash
-$ A2_VERA_SLOT=7 ./a2emu examples/memtest/memtest.dsk
-a2emu: VERA card in slot 7 ($C700)
-```
-✅ PASS - Correctly places VERA in slot 7
-
-### Test 5: Hard Disk Conflict Detection
-Programs include conflict detection test that:
-- Simulates hard disk in slot 7
-- Verifies detection fails (can't read/write register)
-- Confirms robustness against false positives
-✅ PASS - Code logic verified
-
----
-
-## Technical Implementation Details
-
-### Detection Method
-The vera_detect() function works by:
-1. Iterating through slots 1-7
-2. Writing test value 0xA5 to ADDR_L register (offset 0)
-3. Reading back to verify echo
-4. Writing inverse pattern 0x5A to confirm
-5. If both patterns echo, confirms this is VERA
-6. Returns slot number (1-7) or 0 if not found
-
-### Why This Works with Hard Disk Controller
-The Apple II hard disk controller's ROM firmware occupies $C700-$C7FF when active.
-These ROM addresses return fixed code bytes, not writable registers.
-The detection test will fail naturally because:
-- Writing to ROM has no effect
-- Reading returns code bytes, not the test patterns
-- The two-pattern test catches this inconsistency
-
-### Register Offsets (per slot)
-- Slot N base address: 0xC000 + N*0x100
-- ADDR_L: base + 0
-- ADDR_M: base + 1
-- ADDR_H: base + 2
-- DATA0: base + 3
-- DATA1: base + 4
-- CTRL: base + 5
-
----
-
-## Compilation Summary
-
-```
-$ make clean && make
-[compiling emulator core files...]
-✅ a2emu built successfully
-✅ a2run built successfully
-
-$ cd examples/memtest && make
-[compiling memtest with cc65...]
-✅ memtest.bin compiled
-✅ memtest.dsk created
-
-$ cd ../vera_demo && make
-[compiling vera_demo with cc65...]
-✅ vera_demo.bin compiled
-✅ vera_demo.dsk created
-```
-
----
-
-## Conclusion
-
-✅ All runtime VERA slot detection features implemented correctly
-✅ All examples compile without errors
-✅ Detection logic handles hard disk conflicts gracefully
-✅ Environment-based configuration works as designed
-✅ Programs are portable across different slot configurations
-✅ Code is well-documented and maintainable
+    cd examples/test_font && make
+    for s in 1 2 3 4 5 6 7 0; do
+      ../../a2run --rom ../../rom --model iiee --vera-slot $s --disk1 test_font.dsk \
+        --no-writeback --frames 200 --text --quiet | head -1
+    done

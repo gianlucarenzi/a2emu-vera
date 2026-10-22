@@ -1,43 +1,97 @@
 #!/bin/bash
-# a2emu-vera-windows: Position a2emu and VERA windows using wmctrl.
-# Windows are positioned non-overlapping: a2emu (Reinette) TOP-LEFT, VERA BOTTOM-RIGHT.
-# For MATE desktop with dual displays:
-#   DP-1: 2560x1440+0+0 (left, not primary)
-#   DP-2: 2560x1440+2560+0 (right, primary, where windows should appear)
-#   Panels: 24px top/bottom, frame extents 2,2,34,2
+# a2emu-vera-windows: place the a2emu windows with the window manager (wmctrl),
+# never overlapping: Apple II (Reinette) TOP-LEFT, VERA BOTTOM-RIGHT of a display.
 #
-# Usage: a2emu-vera-windows [OPTIONS]
-#   By default, positions for DP-2 (right display, primary).
-#   --left: Position for DP-1 (left display)
-#   --help: Show this help message
+# Usage: a2emu-vera-windows [--pid PID] [--left] [--timeout SECONDS]
+#   --pid      only the windows of this a2emu process (default: any a2emu window)
+#   --left     the display at x = 0 instead of the primary one
+#   --timeout  how long to wait for both windows (default 10 s)
+#   --print    only print where the windows would go
+#
+# Nothing is fixed: the displays come from xrandr (primary, else the first one),
+# the panels from each dock's _NET_WM_STRUT_PARTIAL (only those on that display),
+# the frame extents and the VERA size from the window itself.  Needs X11 with
+# wmctrl, xrandr, xprop and xwininfo.
 
-set -e
-
-# Default positions (DP-2, right display)
-REINETTE_POS="0,2560,24,-1,-1"
-VERA_POS="0,4476,900,-1,-1"
-
-# Parse options
-case "${1:-}" in
-    --left)
-        # DP-1 (left display): a2emu at (0, 24), VERA at (1216, 900)
-        REINETTE_POS="0,0,24,-1,-1"
-        VERA_POS="0,1216,900,-1,-1"
-        ;;
-    --help|-h)
-        head -20 "$0" | tail -16
-        exit 0
-        ;;
-esac
-
-# Wait for windows to appear and position them
-# Retry a few times as windows may take time to open
-for attempt in 1 2 3 4 5; do
-    if wmctrl -r "Reinette ][+" -e "$REINETTE_POS" 2>/dev/null; then
-        wmctrl -r "VERA (a2_vera)" -e "$VERA_POS" 2>/dev/null || true
-        break
-    fi
-    sleep 0.5
+PID=
+PRINT=0
+LEFT=0
+TIMEOUT=10
+while [ $# -gt 0 ]; do
+    case $1 in
+        --pid) shift; PID=$1 ;;
+        --left) LEFT=1 ;;
+        --print) PRINT=1 ;;
+        --timeout) shift; TIMEOUT=$1 ;;
+        --help|-h) sed -n "2,14p" "$0"; exit 0 ;;
+    esac
+    shift
 done
 
-exit 0
+# the display WxH+X+Y: connected outputs with a mode (disabled ones have none)
+OUTS=$(xrandr --query | grep ' connected')
+if [ $LEFT = 1 ]; then
+    GEOM=$(grep -o '[0-9]*x[0-9]*+0+[0-9]*' <<< "$OUTS" | head -1)
+else
+    GEOM=$(grep ' connected primary' <<< "$OUTS" | grep -o '[0-9]*x[0-9]*+[0-9]*+[0-9]*' | head -1)
+fi
+[ -n "$GEOM" ] || GEOM=$(grep -o '[0-9]*x[0-9]*+[0-9]*+[0-9]*' <<< "$OUTS" | head -1)
+[ -n "$GEOM" ] || { echo "a2emu-vera-windows: no display found (xrandr)" >&2; exit 1; }
+IFS='x+' read -r DW DH DX DY <<< "$GEOM"
+
+# usable area of that display: the screen minus the panels that touch it.
+# A strut is measured from the edge of the whole X screen (RW x RH).
+RW=$(xwininfo -root | awk '/Width:/ {print $2}')
+RH=$(xwininfo -root | awk '/Height:/ {print $2}')
+L=$DX; T=$DY; R=$((DX + DW)); B=$((DY + DH))
+for w in $(xprop -root _NET_CLIENT_LIST | sed 's/.*# //; s/,//g'); do
+    s=$(xprop -id "$w" _NET_WM_STRUT_PARTIAL 2>/dev/null | sed -n 's/.*= //p' | tr -d ,)
+    if [ -z "$s" ]; then                           # old-style strut: the whole edge
+        s=$(xprop -id "$w" _NET_WM_STRUT 2>/dev/null | sed -n 's/.*= //p' | tr -d ,)
+        [ -n "$s" ] && s="$s 0 $((RH - 1)) 0 $((RH - 1)) 0 $((RW - 1)) 0 $((RW - 1))"
+    fi
+    [ -n "$s" ] || continue
+    read -r sl sr st sb ly0 ly1 ry0 ry1 tx0 tx1 bx0 bx1 <<< "$s"
+    # each strut counts only where its span overlaps this display
+    [ "$st" -gt 0 ] && [ "$tx1" -ge "$DX" ] && [ "$tx0" -lt "$R" ] && [ "$st" -gt "$T" ] && T=$st
+    [ "$sb" -gt 0 ] && [ "$bx1" -ge "$DX" ] && [ "$bx0" -lt "$R" ] && [ $((RH - sb)) -lt "$B" ] && B=$((RH - sb))
+    [ "$sl" -gt 0 ] && [ "$ly1" -ge "$DY" ] && [ "$ly0" -lt "$((DY + DH))" ] && [ "$sl" -gt "$L" ] && L=$sl
+    [ "$sr" -gt 0 ] && [ "$ry1" -ge "$DY" ] && [ "$ry0" -lt "$((DY + DH))" ] && [ $((RW - sr)) -lt "$R" ] && R=$((RW - sr))
+done
+
+# wait for an a2emu window whose title contains $1, print its id
+wait_win() {
+    local i id
+    for i in $(seq $((TIMEOUT * 10))); do
+        id=$(wmctrl -lp | awk -v t="$1" -v p="$PID" \
+            'index($0, t) && (p == "" || $3 == p) { print $1; exit }')
+        [ -n "$id" ] && { echo "$id"; return 0; }
+        sleep 0.1
+    done
+    return 1
+}
+
+A2=$(wait_win "Reinette") || { echo "a2emu-vera-windows: no Apple II window" >&2; exit 1; }
+VERA=$(wait_win "VERA (a2_vera)") || { echo "a2emu-vera-windows: no VERA window" >&2; exit 1; }
+
+# frame extents l r t b and client size of a window
+frame() { xprop -id "$1" _NET_FRAME_EXTENTS 2>/dev/null | sed -n 's/.*= //p' | tr -d ,; }
+size()  { xwininfo -id "$1" | awk '/Width:/ {w = $2} /Height:/ {h = $2} END {print w, h}'; }
+read -r AL AR AT AB <<< "$(frame "$A2")";   AL=${AL:-0} AR=${AR:-0} AT=${AT:-0} AB=${AB:-0}
+read -r VL VR VT VB <<< "$(frame "$VERA")"; VL=${VL:-0} VR=${VR:-0} VT=${VT:-0} VB=${VB:-0}
+read -r AW AH <<< "$(size "$A2")"
+read -r VW VH <<< "$(size "$VERA")"
+
+# frame rectangles: Apple II at (L,T), VERA ending at (R,B)
+VX=$((R - VW - VL - VR)); VY=$((B - VH - VT - VB))
+if [ $((L + AW + AL + AR)) -gt "$VX" ] && [ $((T + AH + AT + AB)) -gt "$VY" ]; then
+    echo "a2emu-vera-windows: warning: the display ($GEOM, usable $((R - L))x$((B - T))) is too small, the windows overlap" >&2
+fi
+
+if [ $PRINT = 1 ]; then
+    echo "display $GEOM usable $L,$T-$R,$B  apple2 $L,$T  vera $VX,$VY"; exit 0
+fi
+
+# wmctrl -e takes frame coordinates
+wmctrl -i -r "$A2" -e "0,$L,$T,-1,-1"
+wmctrl -i -r "$VERA" -e "0,$VX,$VY,-1,-1"

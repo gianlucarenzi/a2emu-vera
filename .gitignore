@@ -5,3 +5,8 @@ examples/*/*.dsk
 examples/*/*.map
 /sdk/boot.sector
 examples/*/*.img
+*.o
+/a2emu
+/a2run
+/a2emu.exe
+examples/*/*.png

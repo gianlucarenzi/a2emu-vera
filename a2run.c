@@ -282,7 +282,7 @@ int main(int argc, char **argv) {
 		if (*e == ',') { zpmin_top = (unsigned)strtol(e + 1, NULL, 0); zpmin_arm = 0; }
 	}
 	vera_bus_init();                                  /* env defaults first, then the flags win */
-	if (vera_slot >= 1 && vera_slot <= 7) g_vera_base = 0xC000 + vera_slot * 0x100;
+	if (vera_slot >= 1 && vera_slot <= 7) { g_vera_base = 0xC000 + vera_slot * 0x100; vera_slot_check(); }
 	if (vera_slot == 0 && vslot_given) g_vera_enabled = 0;
 	if (vera_irq >= 0) g_vera_irq = vera_irq;
 	if (sdcard && !sdcard_attach(sdcard)) { fprintf(stderr, "a2run: cannot use SD card image %s\n", sdcard); return 2; }

@@ -1,36 +1,22 @@
-# VERA Memory Test for Apple II
+# memtest -- IIe aux RAM + VERA registers + VRAM
 
-A simple test program that verifies VERA's 128 KB VRAM through the memory window.
+The Apple II counterpart of `VERA_C64/tests/test_mem.c` (GeoRAM / RAMbo next to the
+VERA there).  Booted straight from the floppy (no DOS), the card found in any slot:
 
-## Files
+1. **aux RAM $0200-$BFFF** (190 pages): each page is filled in main RAM, moved to
+   aux with the IIe's AUXMOVE (`$C311`), moved back and compared; after every page
+   the VERA ADDR0_L/ADDR0_M are written and read back.  $0000-$01FF and the aux
+   language card are not tested (they switch together with the stack).  Skipped on
+   a ][+ or on a IIe without the extended 80-column card.
+2. **VRAM $00000-$1F9BF** (below the PSG, palette and sprite registers) through
+   DATA0, increment 1: filled, then verified.
 
-- `memtest.c`: Test program that writes and verifies a 64 KB pattern in VERA VRAM
-- `Makefile`: Build rules for the test
+Every byte tested also goes straight into the VERA border colour; the border covers
+the whole screen (`VSTART = VSTOP = 0`).  At the end the border shows the result:
+green = all OK, red = error; the Apple screen lists AUX RAM / VERA REGS / VERA VRAM.
 
-## Building
+## Build and run
 
-```bash
-make           # Build memtest.dsk
-make test      # Run headless in a2run (Apple II screen only)
-make run       # Boot in a2emu (shows both Apple II and VERA screens)
-make clean     # Remove build artifacts
-```
-
-## Test Details
-
-The test:
-1. Fills 64 KB of VERA VRAM with a pattern: `byte = (address ^ (address >> 8))`
-2. Reads it back and verifies each byte
-3. Shows results on screen
-4. Sets border color: Green (color 5) if OK, Red (color 2) if errors
-
-## Models
-
-- Default: Enhanced Apple IIe (`iiee`)
-- Apple II+ (`MODEL=ii+`): `make MODEL=ii+ run`
-
-## Output
-
-When run with `a2emu`:
-- **Apple II window**: Shows test progress and results
-- **VERA window**: Shows real-time VRAM activity during test
+    make
+    A2_MODEL=iiee A2_AUX=64 a2emu memtest.dsk
+    make test A2RUN="../../a2run --rom ../../rom"   # headless (IIe + 64 KB aux), about 1500 frames

@@ -1,66 +1,15 @@
-# VERA Scrolling Test for Apple II
+# test_scrolling -- VERA colour gradient + VSYNC-locked scroll
 
-This is a port of the VERA gradient and scrolling test from the C64 test suite.
+Port of `VERA_C64/tests/test_gradient_scroll.c`.  Booted straight from the floppy
+(no DOS), it finds the A2VERA card in any slot, fills the 128x64 tilemap of layer 1
+with a diagonal colour gradient and scrolls it 50 pixels up, down, right and left,
+the speed going 1 -> 8 -> 1 pixels per frame, until a key is pressed.
 
-## What It Does
+Frames are timed by the VERA itself: `vera_wait_vsync()` clears ISR VSYNC and polls
+it (no IRQ needed; the Apple II has no frame clock of its own).
 
-The test:
-1. Fills the VERA framebuffer with a diagonal gradient pattern
-2. Tests horizontal scrolling (HSCROLL register)
-3. Tests vertical scrolling (VSCROLL register)
-4. Demonstrates all four scroll directions
+## Build and run
 
-## Building
-
-```bash
-make
-```
-
-This creates `test_scrolling.dsk` which can be run with a2emu.
-
-## Running
-
-```bash
-a2emu test_scrolling.dsk
-```
-
-Or with a specific VERA slot:
-
-```bash
-A2_VERA_SLOT=6 a2emu test_scrolling.dsk
-```
-
-## What to Expect
-
-- The Apple II screen shows test progress
-- The VERA window should display a diagonal gradient pattern
-- As the test runs, the pattern should scroll (right, down, left, up)
-- The pattern should wrap around smoothly
-- At the end, the pattern returns to the starting position
-
-## Technical Details
-
-The test uses VERA's Display Controller (DC) registers:
-- **DCSEL=3**: Layer scroll registers
-- **DC_L0_HSCROLL_L/H**: Horizontal scroll (12-bit, DCSEL=3, offsets 0x09/0x0A)
-- **DC_L0_VSCROLL_L/H**: Vertical scroll (12-bit, DCSEL=3, offsets 0x0B/0x0C)
-
-Scroll values are 12-bit, allowing for smooth continuous scrolling.
-
-## Porting From C64
-
-Original source: `~/Progetti-CVS/C64/VERA_C64/tests/test_gradient_scroll.c`
-
-Key differences:
-- C64 version: used text layer with tilemap-based scrolling
-- Apple II version: uses framebuffer-based scrolling
-- C64 had VSync-locked animation, Apple II version shows direct scroll changes
-- Both test the core VERA scroll register functionality
-
-## Notes
-
-This test is essential for verifying:
-- VRAM write/read through DATA0
-- Display Controller register access via CTRL
-- Layer 0 scroll register functionality (HSCROLL, VSCROLL)
-- Proper coordinate wrapping in scroll values
+    make                 # test_scrolling.dsk (VT_MODE=8; 4 and 6 as in test_font)
+    make run             # boot it in a2emu
+    make test A2RUN="../../a2run --rom ../../rom"   # headless, VERA shot in test_scrolling.png
