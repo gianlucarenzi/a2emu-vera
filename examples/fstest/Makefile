@@ -1,13 +1,17 @@
 # fstest.dsk: A2FS read/write test on a self-booting Disk II image, no DOS needed.
 #   make        -> fstest.dsk (with DATA4K and DATA8K)
-#   make test   -> run it headless in a2run, then check OUT3K from the host with fs.py
+#   make test   -> run it headless in a2run (DISKTIME=1: timed disk), then check OUT3K
+#                  from the host with fs.py
 #   make run    -> boot it in a2emu (enhanced IIe; MODEL=plus for the ][+)
 CL65  ?= cl65
 LOAD   = 0x0900
 HIMEM  = 0x9400
 MODEL ?= iiee
+# a2run disk model: 1 = rotational timing (like a real drive), 0 = simple
+DISKTIME ?= 1
 SRC    = fstest.c a2fs.c rwts.s
-COPT  ?= -Osir -Cl    # -Cl: static locals, the fastest here
+# -Cl: static locals, the fastest here
+COPT  ?= -Osir -Cl
 
 all: fstest.dsk
 
@@ -29,7 +33,7 @@ fstest.dsk: boot.bin fstest.bin data4k.bin data8k.bin fs.py
 # a2run writes the floppy back at exit: work on a copy, then read OUT3K on the host
 test: fstest.dsk
 	cp fstest.dsk test.dsk
-	a2run --model $(MODEL) --disk1 test.dsk --frames 3000 --text --quiet | grep -v '^|  *|$$'
+	A2_DISKTIME=$(DISKTIME) a2run --model $(MODEL) --disk1 test.dsk --frames 3000 --text --quiet | grep -v '^|  *|$$'
 	python3 fs.py ls test.dsk
 	python3 fs.py get test.dsk OUT3K out3k.bin
 
