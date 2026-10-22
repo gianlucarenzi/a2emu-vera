@@ -17,6 +17,11 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   firmware enables its own 80-column code at $C3xx only if it finds aux memory; otherwise it leaves
   the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
   `a2run` takes `--aux 64` for the same.
+  Aux memory size: `./a2emu --aux SIZE disk.po` (overrides `A2_AUX`; `a2run --aux SIZE`), SIZE =
+  `0`, `64K` (extended 80-column card), `512K`, `1M`, `4M` or `8M`.  512K-8M fit a RamWorks
+  III-compatible card (8M = RAM2E II): a write to `$C073` selects the 64 KB aux bank, reset selects
+  bank 0, the 80-column screen always shows bank 0.  The RAM2E's own configuration commands are not
+  emulated.  E.g. `A2_MODEL=iiee scripts/a2emu-vera --aux 8M disk.po`.
 - VERA slot: `A2_VERA_SLOT=<1-7>` (default 4; `a2run --vera-slot N`), e.g. `A2_VERA_SLOT=5 ./a2emu disk.po`
   puts the card at $C500-$C51F.  Slot 6 always holds the Disk II and slot 7 the hard disk when one is
   inserted: their firmware wins the reads there, so the emulator warns that the VERA is unreachable.

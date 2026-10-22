@@ -147,6 +147,10 @@ static void sdl_title(void *wdo, const char *title) { SDL_SetWindowTitle((SDL_Wi
 #ifndef MAC_FRONTEND   /* POSIniX/Mac: SDL main() disabled; see reinette_mac.c */
 int main(int argc, char *argv[]) {
 
+	/* options before the disk images: --aux SIZE (IIe aux memory, overrides A2_AUX) */
+	const char *auxArg = NULL;
+	while (argc > 2 && !strcmp(argv[1], "--aux")) { auxArg = argv[2]; argv[2] = argv[0]; argv += 2; argc -= 2; }
+
 
 	//========================================================= SDL INITIALIZATION
 
@@ -343,7 +347,11 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 		if (!strcmp(model, "iiee")) g_cpu = 2;                                    // 65C02
-		{ const char *ax = getenv("A2_AUX"); g_iie_aux = ax && atoi(ax) >= 64; }  // A2_AUX=64: extended 80-col card
+		if (!a2_set_aux(auxArg ? auxArg : getenv("A2_AUX"))) {                   // --aux / A2_AUX: 64K = 80-col card,
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fatal error",          //   512K..8M = RamWorks ($C073)
+				"aux memory (--aux / A2_AUX): use 0, 64K, 512K, 1M, 4M or 8M", NULL);
+			return 1;
+		}
 		SDL_SetWindowTitle(wdo, !strcmp(model, "iiee") ? "Reinette //e (enhanced)" : "Reinette //e");
 
 		/* the IIe character generator: lowercase, inverse and (enhanced) MouseText.

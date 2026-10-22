@@ -99,12 +99,13 @@ extern bool muted;                          // speaker mute (frontend toggles, s
 
 // Apple IIe mode (E13)
 extern int  g_iie;                          // 0 = ][+, 1 = IIe, 2 = enhanced IIe
-extern int  g_iie_aux;                      // 1 = extended 80-column card (aux 64 KB)
+extern int  g_iie_aux;                      // aux 64 KB banks: 0 none, 1 80-col card, 2-128 RamWorks ($C073)
 extern int  g_memslow;
 extern bool S80STORE, RAMRD, RAMWRT, ALTZP, INTCXROM, SLOTC3ROM, S80COL, ALTCHAR;
 int  a2_load_iie_roms(const char *dir, int enhanced);   // 1 = loaded, IIe mode on
 int  a2_load_iie_video_rom(const char *dir, int enhanced, uint8_t *buf);   // 2 KB charset, 1 = loaded
-const uint8_t *a2_aux_ram(void);            // aux 64 KB, NULL without the extended 80-column card
+const uint8_t *a2_aux_ram(void);            // aux bank 0 (the video one), NULL without aux memory
+int  a2_set_aux(const char *s);             // aux memory 0|64K|512K|1M|4M|8M; 0 = invalid size
 void a2_reset(void);                        // machine reset (IIe: switches + LC to ROM)
 
 // frontend hooks (NULL = not provided)

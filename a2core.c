@@ -200,13 +200,23 @@ bool LCWFF = false;                                                             
  * there is no aux RAM: aux reads return $FF, aux writes are lost, ALTZP does nothing
  * (on a real machine it would map in floating bus) -- so aux-detection code (ProDOS's
  * /RAM) correctly finds none.
+ * RamWorks III-style card (g_iie_aux = 2-128 banks of 64 KB, up to 8 MB like the
+ * RAM2E II): a write to $C073 selects the aux bank (bits 0-6, modulo the banks fitted)
+ * that RAMRD/RAMWRT/80STORE/ALTZP map in; reset selects bank 0.  The 80-column video
+ * always shows bank 0, as on the RamWorks.  The RAM2E's own configuration commands
+ * are not modelled.
  * Not modelled: double-res VIDEO (the frontend draws 40/80-column TEXT only),
  * snapshots of the IIe state, the IIe keyboard's auto-repeat. */
 int      g_iie = 0;
-int      g_iie_aux = 0;                /* 1 = extended 80-column card (aux 64 KB) fitted */
+int      g_iie_aux = 0;                /* aux 64 KB banks: 0 = none, 1 = extended 80-column
+                                          card, 2-128 = RamWorks-style card ($C073) */
 int      g_memslow = 0;                /* puce6502.c: RAM accesses take the slow path */
 uint8_t  iiecx[0x1000];                /* internal ROM image for $C000-$CFFF */
-static uint8_t aux[RAMSIZE], auxlgc[LGCSIZE], auxbk2[BK2SIZE];
+struct auxbank { uint8_t ram[RAMSIZE], lgc[LGCSIZE], bk2[BK2SIZE]; };
+static struct auxbank auxbank0;        /* banks 1.. are allocated at the first switch to them */
+static struct auxbank *auxbanks;
+static int auxbank_cur = 0;
+static uint8_t *aux = auxbank0.ram, *auxlgc = auxbank0.lgc, *auxbk2 = auxbank0.bk2;
 bool S80STORE = false, RAMRD = false, RAMWRT = false, ALTZP = false;
 bool INTCXROM = false, SLOTC3ROM = false, S80COL = false, ALTCHAR = false;
 
@@ -222,7 +232,24 @@ static inline uint8_t *iie_bank(uint16_t a, int write) {
 	if (a < 0x0200) return &ram[a];
 	return (write ? RAMWRT : RAMRD) ? aux_at(a, write) : &ram[a];
 }
-const uint8_t *a2_aux_ram(void) { return g_iie_aux ? aux : NULL; }   /* for 80-column video */
+const uint8_t *a2_aux_ram(void) { return g_iie_aux ? auxbank0.ram : NULL; }   /* for 80-column video */
+/* aux memory size: "0" (none), "64K" (extended 80-column card), "512K", "1M", "4M",
+ * "8M" (RamWorks-style).  K/KB/M/MB in either case; a bare number is in KB, so the
+ * old "64" still works.  Returns 0 (and leaves g_iie_aux alone) on any other value. */
+int a2_set_aux(const char *s) {
+	static const int ok[] = { 0, 64, 512, 1024, 4096, 8192 };
+	if (!s || !*s) s = "0";
+	char *e; long n = strtol(s, &e, 10);
+	if (e == s || n < 0) return 0;
+	if (*e == 'M' || *e == 'm' || *e == 'K' || *e == 'k') {
+		if (*e == 'M' || *e == 'm') n *= 1024;
+		if (*++e == 'B' || *e == 'b') e++;
+	}
+	if (*e) return 0;
+	for (unsigned i = 0; i < sizeof ok / sizeof ok[0]; i++)
+		if (n == ok[i]) { g_iie_aux = (int)(n / 64); return 1; }
+	return 0;
+}
 static void iie_update_memslow(void) { g_memslow = g_iie && (RAMRD || RAMWRT || S80STORE); }
 
 static void swapbuf(uint8_t *a, uint8_t *b, size_t n) {
@@ -235,6 +262,20 @@ static void iie_set_altzp(bool on) {            /* swap ZP+stack and the LC with
 	swapbuf(lgc, auxlgc, LGCSIZE);
 	swapbuf(bk2, auxbk2, BK2SIZE);
 	ALTZP = on;
+}
+/* RamWorks bank register: returns 1 if the mapping changed (the caller resyncs fetchMem) */
+static int iie_set_auxbank(uint8_t v) {
+	if (g_iie_aux < 2) return 0;
+	int b = (v & 0x7F) % g_iie_aux;
+	if (b == auxbank_cur) return 0;
+	if (!auxbanks && !(auxbanks = calloc((size_t)g_iie_aux - 1, sizeof *auxbanks))) return 0;
+	bool z = ALTZP;
+	iie_set_altzp(false);                        /* the swap is per bank: undo it, remap, redo */
+	struct auxbank *p = b ? &auxbanks[b - 1] : &auxbank0;
+	aux = p->ram; auxlgc = p->lgc; auxbk2 = p->bk2;
+	auxbank_cur = b;
+	iie_set_altzp(z);
+	return 1;
 }
 
 //============================================================ FETCH-VIEW MIRROR
@@ -1050,6 +1091,7 @@ uint8_t softSwitches(uint16_t address, uint8_t value, bool WRT) {
   	case 0xC067: return readPaddle(3);                                          // Paddle 3
 
   	case 0xC070: resetPaddles(); break;                                         // paddle timer RST
+  	case 0xC073: if (WRT && iie_set_auxbank(value)) fetchSyncAll(); break;      // RamWorks aux bank
 
     case 0xC080:                                                      // LANGUAGE CARD :
   	case 0xC084: LCBK2 = 1; LCRD = 1; LCWR = 0;      LCWFF = 0;    break;       // LC2RD
@@ -1260,6 +1302,7 @@ void writeMemSlow(uint16_t address, uint8_t value) {
  * language-card state (a II+ with LC RAM mapped takes RESET through $FFFC in RAM). */
 void a2_reset(void) {
 	if (g_iie) {
+		iie_set_auxbank(0);
 		iie_set_altzp(false);
 		S80STORE = RAMRD = RAMWRT = INTCXROM = SLOTC3ROM = S80COL = ALTCHAR = false;
 		LCRD = false; LCBK2 = true; LCWR = true; LCWFF = false;
