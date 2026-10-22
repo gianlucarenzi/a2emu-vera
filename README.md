@@ -13,6 +13,7 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   **The Apple ROMs are copyrighted by Apple: downloading them is not legal unless you actually own
   the original hardware.** If you do, dumping the chips of your own machine is the clean way to get them.
 - Run: `A2_MODEL=iie ./a2emu disk.po` (from this directory); `iiee` = enhanced IIe, `A2_AUX=64` adds the extended 80-column card.
+  The window title shows the model (`Reinette ][+`, `Reinette //e`, `Reinette //e (enhanced)`) and the disks.
   **`PR#3` (80 columns) needs `A2_AUX=64`**: the IIe defaults to no aux memory, and at reset the IIe
   firmware enables its own 80-column code at $C3xx only if it finds aux memory; otherwise it leaves
   the (empty) external slot 3 mapped and `PR#3` hangs, as on a real IIe without an 80-column card.
@@ -38,7 +39,9 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   The VERA window is titled `VERA [A2]`, as `VERA [C64]` in VICE and `VERA [A8]` in atari800, so the
   same script places any of them with no options: `scripts/a2emu-vera-windows --pid $(pgrep -n x64sc)`.
 - `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run`/`a2fs` in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them but keeps the installed `rom/`.
-- Keys: F9 warp, F10 pause, F11 reset, F12 help.
+- Keys: Ctrl+F1 / Alt+F1 save the floppy in drive 1 / 2 back to its file, F2 screenshot, F3 paste the clipboard as keystrokes,
+  Shift/Ctrl+F4 volume, Shift/Ctrl+F5/F6 joystick release/action speed, Shift/Ctrl+F7 zoom,
+  F9 warp, F10 pause, F11 reset, F12 help.
 - SD card: `A2_SDCARD=sd.img` (or `a2run --sdcard sd.img`) puts a raw image of 512-byte sectors (at least 512 KB) on the VERA's SPI port as an SDHC card in SPI mode (CMD0/1/8/9/10/12/13/16/17/18/24/25/55/58/59, ACMD13/23/41/51; written through).  The SPI follows VERA 48.0.1's `spictrl.v` clock by clock: a byte takes 16 VERA clocks, 512 with SLOW.
 - VERA timing: the VERA catches up to the CPU before every register access and after every instruction (where its IRQ is sampled, as on the 6502); its audio makes a sample every 512 VERA clocks, so the PCM FIFO and AFLOW follow CPU time.  Writes to the composer/layer registers and, unless `A2_VERA_MIDLINE=0`, to VRAM/palette/sprites draw the line up to the beam first: raster effects land on the pixel (x16emu does the VRAM part only with `-midline-effects`).
 - Env: `A2_WAV=out.wav` records the stereo card audio, `A2_SPEAKER=0` drops the speaker stream, `A2_FPS=1` prints the frame rate.
@@ -61,10 +64,31 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   first -- and the `vtext` text console) used by `examples/test_font`, `test_scrolling`, `test_maze`, `test_matrix`, `test_fx`, `test_irq` (ports of the VERA_C64 tests;
   `vera_irq.s` hooks the 6502 IRQ vector in LC RAM, `delay.s` waits in CPU cycles),
   `vera_demo` (320x240 8 bpp bitmap) and `memtest` (IIe aux RAM + VERA registers + VRAM).
+- `examples/ramworks` (`make test`): IIe aux banking for every `--aux` size, and the RAM2E II's
+  commands over three power-ons (detection, LED, capacity mask, command timeout, saved settings).
 - `examples/hello` (`make run`) and `examples/fstest` (`make test`: reads two files, writes a
   third and reads it back, then checks it from the host) use the SDK from this tree.
-- `a2run --help` lists the headless options (`--hd`, `--frames`, `--wav`, `--ymlog`, `--ym on`, ...).
+- The header of `a2run.c` lists the headless options (`--model`, `--aux`, `--hd`, `--frames`, `--keys`,
+  `--input`, `--wav`, `--ymlog`, `--ym on`, ...).
 - The VERA's PSG (and PCM) is always there; the A2VERA's YM2151 at VERA base + $20 is optional and absent by default: `A2_YM=1` (or `a2run --ym on`) fits it.  YM2151 core: ymfm (BSD-3, `extern/ymfm`).
+
+## Changes from upstream
+
+What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera `main` (9cddaec):
+
+| Area | Change | Commits |
+|---|---|---|
+| Build | Builds with SDL < 2.0.22; compiler warnings cleaned up | ebea2af |
+| Install | `make install`/`uninstall` with `~/bin` launchers; `rom` may be a symlink to the installed ROMs; the disk tools (`a2fs`) and a cc65 SDK installed too | 5362a80, 831a817, 2fed052 |
+| IIe video | TEXT drawn with the IIe video ROM (lowercase, inverse, MouseText); 80-column TEXT from aux memory, 80STORE keeps page 1 on screen | 8e869a4, 4187b00 |
+| IIe aux memory | `--aux` / `A2_AUX` = `0`, `64K`, `512K`, `1M`, `4M`, `8M`: extended 80-column card or RamWorks III banking at `$C071`-`$C077` | ed1ff1e, 7d7d653 |
+| RAM2E II | `--aux RAM2E`: Garrett's Workshop RAM2E II after its HDL -- command sequence, detection, capacity mask, LED, settings saved in `ram2e.nvm`; GWRAM.SYSTEM works | 7d7d653 |
+| Disk II | Timed disk model: a write starts on the next nibble, not the one just read | 7943cab |
+| VERA | Line buffers, SCANLINE, VSTART and sprite timing per the 48.0.1 HDL; audio on VERA time, IRQ per instruction, mid-line raster effects; ISR write clears bits 2:0 only; SPI per `spictrl.v` with an SD card image; 16-bit PCM fixed | 17e1791, 92f4bd4, 484a5c6, 1aa0e1e |
+| VERA slot | Configurable slot (`A2_VERA_SLOT`, `--vera-slot`); runtime slot detection for programs, robust against the hard disk and the floating bus | cd7ba20, 2c17344, f96c473, 2517f88, 40c0870 |
+| Windows | Close from the X of either window; cursor hidden; window titles show the model, VERA window `VERA [A2]`; `a2emu-vera-windows` places the windows of a2emu, VICE (`VERA [C64]`) and atari800 (`VERA [A8]`) | 0e12d91, cac8ca5, 494f8bd, 6a43b11, 94c3f19 |
+| Examples | `hello`, `fstest` (A2FS on a Disk II, no DOS), `memtest`, `sdtest`, `vera_demo`; VERA_C64 test ports `test_font`, `test_scrolling`, `test_maze`, `test_fx`, `test_matrix`, `test_irq`; `ramworks` (aux banking + RAM2E); VERA stores without the NMOS dummy read | 52416cc, 91cbfa0, 9b9060c, 5d95fe0, eee485c, 4f65783, dc2772c, 578bd22, 1f8357b, 197860b, ed1ff1e, 7d7d653 |
+| Docs | Where the ROMs came from (and that downloading them needs the hardware); `PR#3` needs aux memory; this table | a41f1aa, 4b883c2 |
 
 A2VERA code: @fletto666 
 YMFM integration: @sandlbn
