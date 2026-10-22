@@ -285,8 +285,6 @@ static void audio_render(void) { }
 /* vc_audio_render — mix PSG + PCM into stereo int16 buffer.
  * Called from SDL audio callback. Sample rate = 25MHz / 512 ≈ 48828 Hz.
  * We resample to the SDL output rate in the callback. */
-static int audio_diag_count = 0;
-
 void vc_audio_render(int16_t *buf, int num_samples)
 {
     /* audio diag stderr spam removed */
@@ -766,22 +764,6 @@ video_space_read_range(uint8_t *dest, uint32_t address, uint32_t size)
     } else {
         for (uint32_t i = 0; i < size; ++i)
             *dest++ = video_space_read(address + i);
-    }
-}
-
-static void
-video_space_write(uint32_t address, uint8_t value)
-{
-    video_ram[address & 0x1FFFF] = value;
-
-    if (address >= ADDR_PSG_START && address < ADDR_PSG_END) {
-        psg_writereg(address & 0x3f, value);
-    } else if (address >= ADDR_PALETTE_START && address < ADDR_PALETTE_END) {
-        palette[address & 0x1ff] = value;
-        video_palette.dirty = true;
-    } else if (address >= ADDR_SPRDATA_START && address < ADDR_SPRDATA_END) {
-        sprite_data[(address >> 3) & 0x7f][address & 0x7] = value;
-        refresh_sprite_properties((address >> 3) & 0x7f);
     }
 }
 
@@ -1805,7 +1787,6 @@ video_write_reg(uint8_t reg, uint8_t value)
             /* vc_dbg_wr: census of every DATA port write by target region, so
                "the routine ran but VRAM is zero" can be attributed. */
             { extern unsigned long vc_wr_bucket[16];
-unsigned long vc_wr_nz[16];
               uint32_t wa = io_addr[reg - 3] & 0x1FFFF;
               vc_wr_bucket[wa >> 13]++;
               /* separate NON-ZERO writes: a game that clears the nametable

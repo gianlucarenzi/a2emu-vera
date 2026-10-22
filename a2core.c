@@ -1328,11 +1328,11 @@ int reinetteLoadState(const char *path) {
 			 * reading it.  Host-generated snapshots embed HOST paths -- if the
 			 * exact path fails, retry by basename in the disk library dir. */
 			if (!insertFloppy((void *)0, fn, d)) {
-				char alt[420]; const char *base = strrchr(fn, '/');
-				snprintf(alt, sizeof alt, "/usr/games/appleII/disk/%s",
-				         base ? base + 1 : fn);
-				if (insertFloppy((void *)0, alt, d))
-					strncpy(fn, alt, sizeof fn - 1);   /* keep state consistent */
+				char alt[sizeof fn]; const char *base = strrchr(fn, '/');
+				int n = snprintf(alt, sizeof alt, "/usr/games/appleII/disk/%s",
+				                 base ? base + 1 : fn);
+				if (n >= 0 && (size_t)n < sizeof alt && insertFloppy((void *)0, alt, d))
+					strcpy(fn, alt);   /* keep state consistent */
 			}
 		}
 		if (fn[0]) {
