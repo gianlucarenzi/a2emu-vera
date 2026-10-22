@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
 	a2_speaker_hook = sdl_playSound;                                              // frontend hooks into a2core
 	a2_title_hook   = sdl_title;
 	vera_bus_init();                                                              // g_vera up, responds at $C400-$C41F
-	SDL_Window   *vwdo = SDL_CreateWindow("VERA (a2_vera)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, SDL_WINDOW_SHOWN);
+	SDL_Window   *vwdo = SDL_CreateWindow("VERA [A2]", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, SDL_WINDOW_SHOWN);
 	SDL_Renderer *vrdr = SDL_CreateRenderer(vwdo, -1, SDL_RENDERER_SOFTWARE);
 	SDL_Texture  *vtex = SDL_CreateTexture(vrdr, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 480);
 	static uint32_t veraFB[640*480];
@@ -352,7 +352,7 @@ int main(int argc, char *argv[]) {
 				"aux memory (--aux / A2_AUX): use 0, 64K, 512K, 1M, 4M or 8M", NULL);
 			return 1;
 		}
-		SDL_SetWindowTitle(wdo, !strcmp(model, "iiee") ? "Reinette //e (enhanced)" : "Reinette //e");
+		SDL_SetWindowTitle(wdo, a2_model_name());
 
 		/* the IIe character generator: lowercase, inverse and (enhanced) MouseText.
 		   Without it TEXT falls back to the ][+ font from assets/ (uppercase only). */

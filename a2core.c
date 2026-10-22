@@ -716,6 +716,9 @@ static void dt_motor(int on) {
 }
 
 void (*a2_title_hook)(void *wdo, const char *title) = NULL;
+const char *a2_model_name(void) {                /* window title prefix */
+	return g_iie == 2 ? "Reinette //e (enhanced)" : g_iie ? "Reinette //e" : "Reinette ][+";
+}
 
 /* Image format from the file name: .po = ProDOS order, .nib = nibbles, anything
  * else 140 KB (.dsk/.do) = DOS order. */
@@ -803,7 +806,7 @@ int insertFloppy(void *wdo, char *filename, int drv) {
 	while (disk[1].filename[i] != 0)                                              // find start of filename for disk1
 		if (disk[1].filename[i++] == '\\') b = i;
 
-	sprintf(title, "Reinette ][+   D1: %s   D2: %s", disk[0].filename + a, disk[1].filename + b);
+	sprintf(title, "%s   D1: %s   D2: %s", a2_model_name(), disk[0].filename + a, disk[1].filename + b);
 	if (a2_title_hook) a2_title_hook(wdo, title);                                 // updates window title
 
 	return 1;

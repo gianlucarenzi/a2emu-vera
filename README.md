@@ -29,6 +29,8 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
 - Windows: `scripts/a2emu-vera [args]` starts this tree's a2emu and places its windows with the
   window manager (`scripts/a2emu-vera-windows`, wmctrl): Apple II top-left, VERA bottom-right of the
   primary display, computed from xrandr and the panels, for any resolution or number of displays.
+  The VERA window is titled `VERA [A2]`, as `VERA [C64]` in VICE and `VERA [A8]` in atari800, so the
+  same script places any of them with no options: `scripts/a2emu-vera-windows --pid $(pgrep -n x64sc)`.
 - `make install` copies binaries, `assets/` and `rom/` to `~/.local/share/a2emu-vera` and puts `a2emu`/`a2run`/`a2fs` in `~/bin` (override with `DATADIR=`/`BINDIR=`); `make uninstall` removes them but keeps the installed `rom/`.
 - Keys: F9 warp, F10 pause, F11 reset, F12 help.
 - SD card: `A2_SDCARD=sd.img` (or `a2run --sdcard sd.img`) puts a raw image of 512-byte sectors (at least 512 KB) on the VERA's SPI port as an SDHC card in SPI mode (CMD0/1/8/9/10/12/13/16/17/18/24/25/55/58/59, ACMD13/23/41/51; written through).  The SPI follows VERA 48.0.1's `spictrl.v` clock by clock: a byte takes 16 VERA clocks, 512 with SLOW.

@@ -111,5 +111,6 @@ void a2_reset(void);                        // machine reset (IIe: switches + LC
 // frontend hooks (NULL = not provided)
 extern void (*a2_speaker_hook)(void);                           // $C030 toggle
 extern void (*a2_title_hook)(void *wdo, const char *title);     // disk inserted
+const char *a2_model_name(void);            // "Reinette ][+" / "Reinette //e" / "... (enhanced)"
 
 #endif
