@@ -140,7 +140,8 @@ int main(void)
         fill(back, i);
         r = read_data(buf, 512) == 0 && memcmp(buf, back, 512) == 0;
     }
-    r = r && cmd(12, 0, 0xFF) == 0;
+    if (cmd(12, 0, 0xFF) != 0)             /* always: after a failed read the card still streams */
+        r = 0;
     busy_wait();
     result("CMD18+12 read blocks 2-3", r);
 
@@ -164,7 +165,8 @@ int main(void)
         fill(back, 1000 + i);
         r = read_data(buf, 512) == 0 && memcmp(buf, back, 512) == 0;
     }
-    r = r && cmd(12, 0, 0xFF) == 0;
+    if (cmd(12, 0, 0xFF) != 0)             /* always: after a failed read the card still streams */
+        r = 0;
     busy_wait();
     result("  reread blocks 4-5", r);
 
