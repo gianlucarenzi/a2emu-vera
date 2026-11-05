@@ -572,6 +572,11 @@ static uint16_t ntsc_scan_pos_y;
 static int      frame_count;
 
 static uint8_t framebuffer[SCREEN_WIDTH * SCREEN_HEIGHT * 4];
+/* the last finished frame, copied at VSYNC (vc_frame_pixels): the window shows
+   whole frames, never one half drawn (2026-11-05: a2emu uploaded framebuffer at
+   the end of each Apple loop, which ends 168 VERA steps before the VERA frame:
+   the cut slid through the picture and a scrolling screen tore and hiccuped) */
+static uint8_t frontbuffer[SCREEN_WIDTH * SCREEN_HEIGHT * 4];
 
 /* Pointer to the vc_t struct's framebuffer (set during tick/render) */
 static vc_t *active_vera;
@@ -1662,6 +1667,7 @@ update_isr_and_coll(uint16_t y, uint16_t compare)
         isr = (isr & 0xf) | sprite_line_collisions;
         sprite_line_collisions = 0;
         isr |= 1; vc_vsync_raised++; /* VSYNC IRQ */
+        if (!vc_norender) memcpy(frontbuffer, framebuffer, sizeof frontbuffer);
     }
     if (y == compare)
         isr |= 2; /* LINE IRQ */
@@ -2304,11 +2310,11 @@ int vc_tick(vc_t *v, int cycles)
     return v->irq_out;
 }
 
-/* the pixels as drawn so far (0xAARRGGBB, A unused), 640 x 480: a frontend
-   uploads them as they are, without vc_render_frame's copy */
+/* the last whole frame (0xAARRGGBB, A unused), 640 x 480, as at its VSYNC: a
+   frontend uploads it as it is, without vc_render_frame's copy */
 const uint32_t *vc_frame_pixels(void)
 {
-    return (const uint32_t *)framebuffer;
+    return (const uint32_t *)frontbuffer;
 }
 
 void vc_render_frame(vc_t *v)

@@ -113,17 +113,41 @@ static void wav_close(void) {
 	wav_out = NULL;
 }
 
+/* queued samples the audio aims for (~60 ms: 3.5 loops) */
+#define AUDIO_TARGET 3000u
+
 static void vera_audio_out(int16_t *buf, int n) {
 	ym_mix(buf, n, 48828);                                    /* + the YM2151 (E14) */
 	if (wav_out && !muted) {                                   /* A2_WAV (little-endian host) */
 		fwrite(buf, 4, (size_t)n, wav_out);
 		wav_n += (uint32_t)n;
 	}
-	if (!veraAudio) return;
-	/* the main loop's pacing keeps the queue near AUDIO_TARGET (the sound card is the
-	   clock); only a big backlog (after warp / a pause) is dropped */
-	if (!muted && SDL_GetQueuedAudioSize(veraAudio) < 48828u * 4u / 4u)
-		SDL_QueueAudio(veraAudio, buf, (Uint32)n * 4u);
+	if (!veraAudio || muted) return;
+	/* the loop runs on the wall clock (the emulated machine's 59.85 Hz); the sound
+	   card may consume a little faster or slower (2026-11-05: ~3 % slower through
+	   PulseAudio here, the old audio-locked pacing then ran at ~58 fps and smooth
+	   scrolling hiccuped twice a second).  The queue is kept near AUDIO_TARGET by
+	   dropping or repeating single sample frames spread evenly over the chunk, at
+	   most 1 in 16 (inaudible), proportional to the error; a big backlog (after
+	   warp / a pause) is dropped */
+	int q = (int)(SDL_GetQueuedAudioSize(veraAudio) / 4u);
+	if (q >= 48828 / 4) return;
+	int adj = (q - (int)AUDIO_TARGET) / 16;                   /* > 0: drop, < 0: repeat */
+	int lim = n / 16;
+	if (adj > lim) adj = lim;
+	if (adj < -lim) adj = -lim;
+	if (adj == 0) { SDL_QueueAudio(veraAudio, buf, (Uint32)n * 4u); return; }
+	static int16_t out[2 * (4096 + 4096 / 16 + 1)];
+	int k = adj > 0 ? adj : -adj, m = 0, acc = 0;
+	for (int i = 0; i < n; i++) {
+		acc += k;
+		bool hit = acc >= n;
+		if (hit) acc -= n;
+		if (hit && adj > 0) continue;                         /* drop this frame */
+		out[2 * m] = buf[2 * i]; out[2 * m + 1] = buf[2 * i + 1]; m++;
+		if (hit) { out[2 * m] = buf[2 * i]; out[2 * m + 1] = buf[2 * i + 1]; m++; }   /* repeat it */
+	}
+	SDL_QueueAudio(veraAudio, out, (Uint32)m * 4u);
 }
 static void vera_audio_run(void) {
 	static int16_t buf[2 * 4096];
@@ -133,8 +157,6 @@ static void vera_audio_run(void) {
 		vera_audio_out(buf, n);
 }
 
-/* audio-locked pacing: queued samples the loop aims for (~60 ms: 3.5 loops) */
-#define AUDIO_TARGET 3000u
 static int audio_queued(void) {             /* samples waiting, -1 = no audio device */
 	return veraAudio && !muted ? (int)(SDL_GetQueuedAudioSize(veraAudio) / 4u) : -1;
 }
@@ -408,8 +430,8 @@ int main(int argc, char *argv[]) {
 	/* real-time pacing: one loop = 17050 CPU cycles = 16.71 ms at 1,020,484 Hz (the rate
 	   the VERA and the audio are timed by, a2core.c A2_CPU_HZ). Vsync alone is not a clock
 	   (compositors may not block, displays may run at 120/144 Hz), so the loop sleeps to
-	   the wall clock, trimmed by the audio queue: the sound card's clock wins, so the
-	   samples never pile up or run dry (no dropped chunks, no wobble). F9 toggles warp. */
+	   the wall clock; the audio follows it (vera_audio_out keeps its queue near
+	   AUDIO_TARGET by dropping / repeating single samples). F9 toggles warp. */
 	const uint64_t pf_hz = SDL_GetPerformanceFrequency();
 	const uint64_t pf_frame = (uint64_t)((double)pf_hz * 17050.0 / 1020484.0);
 	uint64_t pf_next = SDL_GetPerformanceCounter() + pf_frame;
@@ -956,15 +978,7 @@ int main(int argc, char *argv[]) {
 			if (!fps_t0) fps_t0 = t;
 			if (++fps_n, t - fps_t0 >= pf_hz) { fprintf(stderr, "a2emu: %d fps (%s), audio queue %d samples\n", fps_n, warp ? "warp" : "1.02 MHz", audio_queued()); fps_n = 0; fps_t0 = t; }
 		}
-		if (!warp && !rv_shotat) {                          /* real-time pacing */
-			int q = audio_queued();                         /* trim by the audio queue: */
-			if (q >= 0) {                                   /* 1/8 of the error per loop, */
-				int64_t e = ((int64_t)q - (int64_t)AUDIO_TARGET) * (int64_t)pf_hz / 48828 / 8;
-				int64_t lim = (int64_t)pf_frame / 4;        /* at most +-25 % of a loop */
-				if (e > lim) e = lim;
-				if (e < -lim) e = -lim;
-				pf_next = (uint64_t)((int64_t)pf_next + e);
-			}
+		if (!warp && !rv_shotat) {                          /* real-time pacing: the wall clock */
 			uint64_t now = SDL_GetPerformanceCounter();
 			if (now < pf_next) {
 				uint64_t ms = (pf_next - now) * 1000 / pf_hz;
