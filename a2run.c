@@ -35,6 +35,7 @@
  *                           the old state is never shot)
  *     --shot-exit F         screenshot of the last VERA frame at exit
  *     --vramdump F          VERA state at exit (x16emu -dump V layout, for veracheck.py)
+ *     --ramdump F           the main 48 KB + RAM ($0000-$BFFF) at exit (test probes)
  *     --keys TEXT           type TEXT (\n = RETURN, ~ = 2 s pause) once the machine has run
  *     --keys-at N           ... starting at VERA frame N (default 60)
  *     --input FILE          scripted input per VERA frame (keys, buttons, paddles, game-port
@@ -134,6 +135,7 @@ static int png_write(const char *path, int w, int h, const uint32_t *rgb, int st
 static const char *shot_prefix = "shot";
 static int shot_full = 0, shot_n = 0, shot_pending = 0, shot_delay = 2;
 static const char *vramdump_path = NULL;
+static const char *ramdump_path = NULL;
 
 static int vera_shot(const char *path) {
 	vc_render_frame(&g_vera);
@@ -254,6 +256,7 @@ int main(int argc, char **argv) {
 		else if (!strcmp(a, "--shot-delay"))  shot_delay = atoi(ARG);
 		else if (!strcmp(a, "--shot-exit"))   shot_exit = ARG;
 		else if (!strcmp(a, "--vramdump"))    vramdump_path = ARG;
+		else if (!strcmp(a, "--ramdump"))     ramdump_path = ARG;
 		else if (!strcmp(a, "--keys"))        keys = ARG;
 		else if (!strcmp(a, "--keys-at"))     keys_at = atoi(ARG);
 		else if (!strcmp(a, "--text"))        want_text = 1;
@@ -365,6 +368,11 @@ int main(int argc, char **argv) {
 	}
 	if (shot_exit && !vera_shot(shot_exit)) fprintf(stderr, "a2run: screenshot %s failed\n", shot_exit);
 	if (vramdump_path && !vc_dump_state(vramdump_path)) fprintf(stderr, "a2run: VRAM dump failed\n");
+	if (ramdump_path) {
+		FILE *f = fopen(ramdump_path, "wb");
+		if (!f || fwrite(ram, 1, 0xC000, f) != 0xC000) fprintf(stderr, "a2run: RAM dump failed\n");
+		if (f) fclose(f);
+	}
 	if (xmem_dump && g_xmem_slot) {
 		FILE *f = fopen(xmem_dump, "wb");
 		if (f) { fwrite(g_xmem, 1, g_xmem_size, f); fclose(f); }
