@@ -96,7 +96,7 @@ What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera 
 | VERA slot | Configurable slot (`A2_VERA_SLOT`, `--vera-slot`); runtime slot detection for programs, robust against the hard disk and the floating bus | cd7ba20, 2c17344, f96c473, 2517f88, 40c0870 |
 | Windows | Close from the X of either window; cursor hidden; window titles show the model, VERA window `VERA [A2]`; `a2emu-vera-windows` places the windows of a2emu, VICE (`VERA [C64]`) and atari800 (`VERA [A8]`) | 0e12d91, cac8ca5, 494f8bd, 6a43b11, 94c3f19 |
 | Examples | `hello`, `fstest` (A2FS on a Disk II, no DOS), `memtest`, `sdtest`, `vera_demo`; VERA_C64 test ports `test_font`, `test_scrolling`, `test_maze`, `test_fx`, `test_matrix`, `test_irq`; `ramworks` (aux banking + RAM2E); VERA stores without the NMOS dummy read | 52416cc, 91cbfa0, 9b9060c, 5d95fe0, eee485c, 4f65783, dc2772c, 578bd22, 1f8357b, 197860b, ed1ff1e, 7d7d653 |
-| Clock | No-Slot Clock (DS1216E) on the IIe for libvera's `plat_rtc`: runs with the machine, starts from the date saved by the last run (`A2_NSC_FILE`), never goes back; `A2_NSC=0` removes it | cf23ad2 |
+| Clock | No-Slot Clock (DS1216E) on the IIe for libvera's `plat_rtc`: runs with the machine, starts from the date saved by the last run (`A2_NSC_FILE`), never goes back; `A2_NSC=0` removes it | def0be6 |
 | Docs | Where the ROMs came from (and that downloading them needs the hardware); `PR#3` needs aux memory; this table | a41f1aa, 4b883c2 |
 
 A2VERA code: @fletto666 
