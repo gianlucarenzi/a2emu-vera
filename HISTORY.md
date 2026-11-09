@@ -4,6 +4,42 @@ Development log of this fork: what was done, why, how it was checked and what wa
 left out.  Newest first.  The README's "Changes from upstream" table is the short
 version; this file keeps the reasoning, the sources and the test evidence.
 
+## 2026-11-09 -- No-Slot Clock with a date that never goes back
+
+What: a Dallas DS1216E SmartWatch ("No-Slot Clock") under the IIe's CD ROM,
+for libvera's `plat_rtc` (VERA_COMMON `src/apple2/rtc.s`): the dates of the
+files a program writes on the VERA's microSD.
+
+Why: the Apple had no clock, so its files all got the date the program set or
+1980-01-01.  The user wanted a clock that ticks every second, is saved to a
+file when the emulator closes and taken from there at the next start, so that
+no date earlier than the last one is ever written.  A real card was chosen
+over an emulator-only register so that the same driver works on a real IIe
+with the clock.
+
+How (`a2core.c`, shared by a2emu and a2run):
+
+- Seen through the internal ROM at `$C100-$CFFF` (data reads go through
+  `readMemSlow`): 64 reads with A2 = 0 write the recognition pattern
+  (C5 3A A3 5C C5 3A A3 5C, LSB first) on A0, a read with A2 = 1 starts it
+  again; then 64 reads with A2 = 1 give the 8 BCD registers on D0 (or 64
+  with A2 = 0 set them).
+- The time: the saved date (`A2_NSC_FILE`, default
+  `~/.config/a2emu-vera/nsc-clock.txt`, `YYYY-MM-DD HH:MM:SS`; 1980-01-01
+  00:00:00 without one) plus the emulated CPU cycles / 1,020,484, kept up in
+  `cpu_vera_step` (the 32-bit `ticks` wraps after ~70 min); saved with
+  `atexit`.  A program setting it moves it forward only.  IIe only,
+  `A2_NSC=0` removes it.
+- Not modelled: the EF ROM socket, the oscillator / reset bits, 12-hour mode.
+
+Checked with a2run and VERA_COMMON's `tests/test_sdwrite.c` (the file dates
+read on the PC with mtools): no file -> 1980-01-01 00:00:03 at the first read,
+00:00:15 saved after 900 frames; the next run went on from 00:00:15 (saved
+00:00:30); a file with 2026-11-09 12:30:00 -> the files dated 12:30, 12:30:15
+saved; `A2_NSC=0` -> no clock, the date set by the program, the file not
+touched.  Not checked: a program setting the clock (forward only), the GUI
+(same core).
+
 ## 2026-10-22 -- IIe aux memory: RamWorks, RAM2E II, double-res
 
 Branch `iie-video-rom` on github.com/gianlucarenzi/a2emu-vera (remote `gianluca`),

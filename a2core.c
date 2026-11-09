@@ -40,6 +40,8 @@
 #include "a2core.h"
 #include "ym2151.h"
 #include "sdcard.h"
+#include <time.h>
+#include <sys/stat.h>
 
 /* VERA (a2_vera card) mapped in a peripheral slot's I/O window.
    The misterblack1/a2_vera card lives at $Cn00-$Cn1F (slot n); we place it in
@@ -85,10 +87,13 @@ static int vera_sync(void) {
 
 /* ~32 CPU cycles, one instruction at a time: after each one the VERA catches up and
    its IRQ line is presented, as the 6502 samples /IRQ at every instruction end. */
+static int nsc_state;                    /* the No-Slot Clock (below) */
+static void nsc_update(void);
 void cpu_vera_step(void) {
 	if (!cvs_init) { cvs_last = ticks; cvs_init = 1; }
 	if (cvs_step1 < 0) cvs_step1 = getenv("A2_STEP1") ? 1 : 0;
 	unsigned int start = ticks;
+	if (nsc_state == 1) nsc_update();            /* the No-Slot Clock keeps the time */
 	do {
 		puce6502Exec(1);
 		if (vera_sync() && g_vera_irq) puce6502IRQ();
@@ -1283,6 +1288,132 @@ static inline void cxxx_note(char rw, uint16_t a, uint8_t v) {
 		        rw, a, v, (a >> 8) & 0x0F, a & 0x1F);
 }
 
+//============================================================ NO-SLOT CLOCK
+/* A No-Slot Clock (Dallas DS1216E SmartWatch) under the IIe's CD ROM, seen
+ * through the internal ROM at $C100-$CFFF: the clock is hidden until 64 reads
+ * write its recognition pattern (C5 3A A3 5C C5 3A A3 5C, every byte LSB
+ * first) as address bit A0 of reads with A2 = 0; then 64 reads with A2 = 1
+ * give its registers on D0 (hundredths, seconds, minutes, hours, day of the
+ * week, date, month, year: BCD, LSB first), or 64 reads with A2 = 0 set them.
+ * A read with A2 = 1 while the pattern is coming starts it again.  The usual
+ * driver: STA $C00A (internal $C3 ROM), LDA $C304, the pattern with LDA
+ * $C300 / $C301, the registers with LDA $C304 (libvera src/apple2/rtc.s).
+ *
+ * The time never goes back: it starts from the date saved by the last run
+ * (A2_NSC_FILE, default ~/.config/a2emu-vera/nsc-clock.txt, a line
+ * "YYYY-MM-DD HH:MM:SS"; 1980-01-01 00:00:00 when there is none), runs with
+ * the emulated CPU (a second every A2_CPU_HZ cycles) and is saved there when
+ * the emulator exits.  A program setting the clock moves it forward only.
+ * IIe only; A2_NSC=0: no clock.  Not modelled: the EF ROM socket, the
+ * oscillator / reset bits (always running), 12-hour mode. */
+static int      nsc_state = -1;          /* -1 not set up, 0 off, 1 on */
+static char     nsc_path[1024];
+static time_t   nsc_base;                /* the date at nsc_cyc = 0, UTC as a plain date */
+static unsigned long long nsc_cyc;       /* CPU cycles since nsc_base */
+static unsigned nsc_last;                /* ticks at the last update */
+static int      nsc_match, nsc_xfer;     /* pattern bits seen; 1-64: a transfer under way */
+static uint8_t  nsc_regs[8], nsc_wregs[8];
+static int      nsc_written;
+
+static const uint8_t nsc_pattern[8] = { 0xC5, 0x3A, 0xA3, 0x5C, 0xC5, 0x3A, 0xA3, 0x5C };
+
+static void nsc_update(void) {
+	nsc_cyc += (unsigned)(ticks - nsc_last);    /* wrap-safe while called within ~70 min */
+	nsc_last = ticks;
+}
+static time_t nsc_now(void) {
+	nsc_update();
+	return nsc_base + (time_t)(nsc_cyc / A2_CPU_HZ);
+}
+static void nsc_save(void) {
+	if (nsc_state != 1) return;
+	time_t t = nsc_now();
+	struct tm tm; gmtime_r(&t, &tm);
+	FILE *f = fopen(nsc_path, "w");
+	if (!f) return;
+	fprintf(f, "%04d-%02d-%02d %02d:%02d:%02d\n", tm.tm_year + 1900, tm.tm_mon + 1,
+	        tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	fclose(f);
+}
+static void nsc_setup(void) {
+	const char *e = getenv("A2_NSC");
+	nsc_state = (g_iie && !(e && !atoi(e))) ? 1 : 0;
+	if (!nsc_state) return;
+	e = getenv("A2_NSC_FILE");
+	if (e) snprintf(nsc_path, sizeof nsc_path, "%s", e);
+	else {
+		const char *h = getenv("HOME");
+		char dir[900];
+		snprintf(dir, sizeof dir, "%s/.config", h ? h : ".");
+		mkdir(dir, 0755);
+		snprintf(dir, sizeof dir, "%s/.config/a2emu-vera", h ? h : ".");
+		mkdir(dir, 0755);
+		snprintf(nsc_path, sizeof nsc_path, "%s/nsc-clock.txt", dir);
+	}
+	struct tm tm = { .tm_year = 80, .tm_mon = 0, .tm_mday = 1 };   /* 1980-01-01 */
+	FILE *f = fopen(nsc_path, "r");
+	if (f) {
+		int y, mo, d, h, mi, sec;
+		if (fscanf(f, "%d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &sec) == 6) {
+			tm.tm_year = y - 1900; tm.tm_mon = mo - 1; tm.tm_mday = d;
+			tm.tm_hour = h; tm.tm_min = mi; tm.tm_sec = sec;
+		}
+		fclose(f);
+	}
+	nsc_base = timegm(&tm);
+	nsc_cyc = 0;
+	nsc_last = ticks;
+	atexit(nsc_save);
+}
+static uint8_t bcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
+static int unbcd(uint8_t v) { return (v >> 4) * 10 + (v & 15); }
+
+/* a read of the internal ROM at `address` that gives `v`: the clock's bit on D0 */
+static uint8_t nsc_access(uint16_t address, uint8_t v) {
+	if (nsc_state < 0) nsc_setup();
+	if (!nsc_state) return v;
+	int a2 = address & 4, a0 = address & 1;
+	if (!nsc_xfer) {                                       /* the pattern */
+		if (a2) { nsc_match = 0; return v; }
+		int bit = nsc_pattern[nsc_match >> 3] >> (nsc_match & 7) & 1;
+		if (a0 != bit) { nsc_match = 0; return v; }
+		if (++nsc_match < 64) return v;
+		nsc_match = 0;                                     /* recognised: the registers */
+		time_t t = nsc_now();
+		struct tm tm; gmtime_r(&t, &tm);
+		nsc_regs[0] = 0;
+		nsc_regs[1] = bcd(tm.tm_sec);
+		nsc_regs[2] = bcd(tm.tm_min);
+		nsc_regs[3] = bcd(tm.tm_hour);                     /* 24 h */
+		nsc_regs[4] = (uint8_t)(tm.tm_wday + 1);           /* 1-7, oscillator on, no reset */
+		nsc_regs[5] = bcd(tm.tm_mday);
+		nsc_regs[6] = bcd(tm.tm_mon + 1);
+		nsc_regs[7] = bcd(tm.tm_year % 100);
+		memset(nsc_wregs, 0, sizeof nsc_wregs);
+		nsc_written = 0;
+		nsc_xfer = 1;
+		return v;
+	}
+	int i = nsc_xfer - 1;                                  /* a register bit */
+	if (a2) v = (uint8_t)((v & 0xFE) | (nsc_regs[i >> 3] >> (i & 7) & 1));
+	else { nsc_wregs[i >> 3] |= (uint8_t)(a0 << (i & 7)); nsc_written = 1; }
+	if (++nsc_xfer > 64) {
+		nsc_xfer = 0;
+		if (nsc_written) {                                 /* set: forward only */
+			int yy = unbcd(nsc_wregs[7]);
+			struct tm tm = { .tm_year = yy < 80 ? yy + 100 : yy,
+			                 .tm_mon = unbcd(nsc_wregs[6] & 0x1F) - 1,
+			                 .tm_mday = unbcd(nsc_wregs[5] & 0x3F),
+			                 .tm_hour = unbcd(nsc_wregs[3] & 0x3F),
+			                 .tm_min = unbcd(nsc_wregs[2] & 0x7F),
+			                 .tm_sec = unbcd(nsc_wregs[1] & 0x7F) };
+			time_t t = timegm(&tm);
+			if (t >= nsc_now()) { nsc_base = t; nsc_cyc = 0; nsc_last = ticks; }
+		}
+	}
+	return v;
+}
+
 static uint8_t readMemSlow_impl(uint16_t address);
 uint8_t readMemSlow(uint16_t address) {
 	uint8_t v = readMemSlow_impl(address);
@@ -1295,7 +1426,7 @@ static uint8_t readMemSlow_impl(uint16_t address) {
 
 	if (g_iie && address >= 0xC100 && address < 0xD000 &&                        // IIe internal ROM
 	    (address >= 0xC800 || INTCXROM || ((address & 0xFF00) == 0xC300 && !SLOTC3ROM)))
-		return iiecx[address - 0xC000];
+		return nsc_access(address, iiecx[address - 0xC000]);                       // + the No-Slot Clock
 
 	if (address >= ROMSTART) {
 		if (!LCRD)
