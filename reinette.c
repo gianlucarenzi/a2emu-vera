@@ -124,16 +124,23 @@ static void vera_audio_out(int16_t *buf, int n) {
 	}
 	if (!veraAudio || muted) return;
 	/* the loop runs on the wall clock (the emulated machine's 59.85 Hz); the sound
-	   card may consume a little faster or slower (2026-11-05: ~3 % slower through
-	   PulseAudio here, the old audio-locked pacing then ran at ~58 fps and smooth
-	   scrolling hiccuped twice a second).  The queue is kept near AUDIO_TARGET by
-	   dropping or repeating single sample frames spread evenly over the chunk, at
-	   most 1 in 16 (inaudible), proportional to the error; a big backlog (after
-	   warp / a pause) is dropped */
+	   card may consume a little faster or slower.  (2026-11-05: "~3 % slower
+	   through PulseAudio" was the loop running ~4 % fast, fixed 2026-11-11.)
+	   The queue is kept near AUDIO_TARGET by dropping or repeating single sample
+	   frames spread evenly over the chunk; a big backlog (after warp / a pause)
+	   is dropped */
 	int q = (int)(SDL_GetQueuedAudioSize(veraAudio) / 4u);
 	if (q >= 48828 / 4) return;
-	int adj = (q - (int)AUDIO_TARGET) / 16;                   /* > 0: drop, < 0: repeat */
-	int lim = n / 16;
+	/* the queue swings by ~2000 samples with the loop's pacing; reacting to
+	   that (it was up to 1 sample in 16 at once) modulated the pitch by a few
+	   per cent, a vibrato on the music (RastanRIP 2026-11-11).  The correction
+	   follows a slow average of the queue and is at most 1 in 512 (0.2 %):
+	   with the loop counting the cycles really run the drift is ~0 */
+	static int qs = -1;                                       /* average queue, x 64 */
+	if (qs < 0) qs = (int)AUDIO_TARGET * 64;
+	qs += q - qs / 64;
+	int adj = (qs / 64 - (int)AUDIO_TARGET) / 64;             /* > 0: drop, < 0: repeat */
+	int lim = n / 512;
 	if (adj > lim) adj = lim;
 	if (adj < -lim) adj = -lim;
 	if (adj == 0) { SDL_QueueAudio(veraAudio, buf, (Uint32)n * 4u); return; }
@@ -444,7 +451,17 @@ int main(int argc, char *argv[]) {
 			   one 268800-step VERA frame per displayed frame). Programs that pace off
 			   VERA vsync ($C407 / ISR) need this interleave -- one tick/frame would hang
 			   them. Same calibration as the headless harnesses. */
-			for (int vc = 0; vc < 17050; vc += 32) cpu_vera_step();
+			{   /* 17050 CPU cycles a loop, counted on the cycles really run: a step
+			       ends after the instruction that reaches 32 cycles, so it overshoots
+			       by a few; counting 32 a step ran ~4 % fast (the VERA, the game and
+			       the music too: the audio queue kept dropping samples and the
+			       music played ~2/3 semitone sharp, RastanRIP 2026-11-11).  The
+			       overshoot of the last step carries to the next loop */
+				static unsigned int loop_over;
+				unsigned int t0 = ticks, want = 17050u - loop_over;
+				while (ticks - t0 < want) cpu_vera_step();
+				loop_over = (ticks - t0) - want;
+			}
 			while (disk[curDrv].motorOn && ++tries)                                   // until motor is off or i reaches 255+1=0
 				for (int vs = 0; vs < 5000; vs += 32) cpu_vera_step();  // speed up drive access -- tick VERA too (its raster must keep running or the scanline-based VERA detect fails)
 			vera_audio_run();                                                         // E9
