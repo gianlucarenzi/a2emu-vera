@@ -1,7 +1,9 @@
 /* vera.h -- the A2VERA card's registers for cc65 programs (-t apple2).
  *
  * The card decodes $Cn00-$Cn1F of its slot n; vera_detect() finds the slot at
- * run time and points `vera` at it, so the same program works in any slot:
+ * run time and points `vera` at it, so the same program works in any slot.
+ * The VERA Module RBL-A2 shows a ProDOS slot ROM there after a reset and its
+ * VERA once $C0nF bit 0 = 1: vera_detect() does that write:
  *
  *     if (!vera_detect()) ... no card
  *     VERA_CTRL = 0;  VERA_DC_VIDEO = 0x11;  ...
@@ -99,7 +101,8 @@ void __fastcall__ vera_poke(unsigned int reg_val);
 void __fastcall__ vera_io_init(unsigned char page);
 
 /* Find the card: for slots 1-7, skip the ones with disk-controller firmware
- * ($Cn01/$Cn03/$Cn05 = $20/$00/$03: Disk II, ProDOS block devices), select
+ * ($Cn01/$Cn03/$Cn05 = $20/$00/$03: Disk II, ProDOS block devices) -- except
+ * the RBL-A2's ("VERAS" at $CnF0): write 1 to its $C0nF to show the VERA --, select
  * DCSEL 63 and check the identity bytes $09 = 'V', $0A = major >= 47, twice,
  * with CTRL reading back $7E / $00.  A write/read-back of ADDR_L is not
  * enough, nor one identity read: other cards and the floating bus of an empty

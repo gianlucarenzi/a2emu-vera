@@ -4,6 +4,47 @@ Development log of this fork: what was done, why, how it was checked and what wa
 left out.  Newest first.  The README's "Changes from upstream" table is the short
 version; this file keeps the reasoning, the sources and the test evidence.
 
+## 2026-11-12 -- VERA Module RBL-A2: VERA + Slinky RAM disk in one slot
+
+What: `A2_VERA_CARD=rbl` (`a2run --vera-card rbl`) models the VERA Module RBL-A2
+(repository Vera-Module-RBL-A2, `A2-SLINKY.md`): in the VERA's slot n, a 256 KB
+Apple II Memory Expansion Card ("Slinky") and a ProDOS slot ROM besides the VERA.
+
+Why: the card's expanded memory must work with ProDOS out of the box, which
+needs a slot ROM with the block-device signature at `$Cn01/03/05/07`, where the
+A2VERA's registers are.  The card shows the ROM after a reset (ProDOS scans the
+slots at boot) and the VERA once `$C0nF` bit 0 = 1; the ProDOS driver sits at
+`$Cn33`, above the VERA window, so it keeps working with the VERA in.
+
+How (`a2core.c`, shared by a2emu and a2run):
+
+- Registers `$C0n0-$C0nF` as the Apple card (checked against MAME's
+  `a2memexp.cpp`): 24-bit address with auto-increment on `$C0n3`, `$C0n2`
+  reads OR `$F0`, `$C0n4-$C0nF` plain registers; reset clears them.
+- `$Cn00-$CnFF`: the ROM (writes ignored), except `$Cn00-$Cn1F` with the VERA
+  in; the fetch mirror holds the ROM.  Slots 6 and 7-with-hard-disk keep their
+  own cards, as for the A2VERA (the existing warning).
+- The register model, the ProDOS formatter and the ROM image are copies of the
+  card firmware's `a2_slinky.h`, `prodos_format.h`, `slinky_rom.h` (`rbla2/`),
+  so the emulator runs the same code as the ESP32.
+- `examples/vera/vera.c`: a slot with the ProDOS signature is still skipped,
+  unless `"VERAS"` reads at `$CnF0`: then `$C0nF = 1` and the usual probe.
+  VERA_COMMON's `plat_apple2.s` start-up does the same for libvera programs.
+- Not in snapshots (neither are the VERA and `--xmem`).
+
+Checked (a2run, ProDOS 2.4.3 from the AppleWin repository, NMOS dummy reads on):
+
+- `examples/test_font`, `--vera-card rbl`: found in slots 1-5 and 7 on the ][+,
+  IIe and enhanced IIe; slot 6 and slot 7 with `--hd`: not found, with the
+  warning.  The A2VERA table (`VERA_DETECTION_TEST_REPORT.md`) is unchanged.
+- Bitsy Bye lists `S4,D1:/SLINKY`; BASIC.SYSTEM `BSAVE`s a 10240-byte file
+  to `/SLINKY` that reads back identical from `--rbl-dump` (][+, IIe, IIe
+  enhanced); with `$C0CF = 1` the VERA answers at `$C400` (`'V'`, 48) and
+  ProDOS keeps saving to `/SLINKY`; `$C0CF = 0` brings the ROM back.
+- VERA_COMMON's Apple test program (`vera_require`) finds the VERA on the
+  RBL-A2 (IIe, IIe enhanced); built with the previous libvera it does not
+  ("VERA card not found in slot 4").
+
 ## 2026-11-09 -- No-Slot Clock with a date that never goes back
 
 What: a Dallas DS1216E SmartWatch ("No-Slot Clock") under the IIe's CD ROM,

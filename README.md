@@ -36,6 +36,14 @@ Reinette II plus (Apple ][+ / IIe, 65C02) with an A2VERA card: VERA video, PSG a
   puts the card at $C500-$C51F.  Slot 6 always holds the Disk II and slot 7 the hard disk when one is
   inserted: their firmware wins the reads there, so the emulator warns that the VERA is unreachable.
   Programs find the slot at run time with `examples/vera/vera.c` (`VERA_DETECTION_TEST_REPORT.md`).
+- VERA card: `A2_VERA_CARD=a2vera` (default) or `rbl` (`a2run --vera-card rbl`) = the VERA Module
+  RBL-A2: in the VERA's slot n, besides the VERA, a 256 KB Apple II Memory Expansion Card ("Slinky",
+  `$C0n0-$C0n3`, `$C0n2` reads OR `$F0`, `$C0n4-$C0nF` plain registers) and a ProDOS slot ROM at
+  `$Cn00-$CnFF`.  After a reset the ROM answers `$Cn00-$Cn1F` too, so ProDOS boots with a RAM disk
+  `/SLINKY` in `Sn,D1` and `PR#n` boots it once it holds ProDOS; `$C0nF` bit 0 = 1 puts the VERA
+  there (`vera_detect()` and libvera's start-up do it when they read `"VERAS"` at `$CnF0`).  The
+  RAM disk is formatted when the card is chosen and survives resets (`a2run --rbl-image F`,
+  `--rbl-dump F`).  Model and ROM: copies of the card firmware's headers in `rbla2/`.
 - Windows: `scripts/a2emu-vera [args]` starts this tree's a2emu and places its windows with the
   window manager (`scripts/a2emu-vera-windows`, wmctrl): Apple II top-left, VERA bottom-right of the
   primary display, computed from xrandr and the panels, for any resolution or number of displays.
@@ -93,6 +101,7 @@ What this fork (github.com/gianlucarenzi/a2emu-vera) adds to sandlbn/a2emu-vera 
 | IIe double-res | Double hi-res and double lo-res when DHIRES (`$C05E`), 80COL and an aux card are on; colours as MAME; `examples/dblres` | 4c14713 |
 | Disk II | Timed disk model: a write starts on the next nibble, not the one just read | 7943cab |
 | VERA | Line buffers, SCANLINE, VSTART and sprite timing per the 48.0.1 HDL; audio on VERA time, IRQ per instruction, mid-line raster effects; ISR write clears bits 2:0 only; SPI per `spictrl.v` with an SD card image; 16-bit PCM fixed | 17e1791, 92f4bd4, 484a5c6, 1aa0e1e |
+| RBL-A2 | `A2_VERA_CARD=rbl` / `--vera-card rbl`: VERA Module RBL-A2, the VERA + a Slinky RAM disk with a ProDOS slot ROM in one slot; `vera_detect()` maps its VERA in | (uncommitted) |
 | VERA slot | Configurable slot (`A2_VERA_SLOT`, `--vera-slot`); runtime slot detection for programs, robust against the hard disk and the floating bus | cd7ba20, 2c17344, f96c473, 2517f88, 40c0870 |
 | Windows | Close from the X of either window; cursor hidden; window titles show the model, VERA window `VERA [A2]`; `a2emu-vera-windows` places the windows of a2emu, VICE (`VERA [C64]`) and atari800 (`VERA [A8]`) | 0e12d91, cac8ca5, 494f8bd, 6a43b11, 94c3f19 |
 | Examples | `hello`, `fstest` (A2FS on a Disk II, no DOS), `memtest`, `sdtest`, `vera_demo`; VERA_C64 test ports `test_font`, `test_scrolling`, `test_maze`, `test_fx`, `test_matrix`, `test_irq`; `ramworks` (aux banking + RAM2E); VERA stores without the NMOS dummy read | 52416cc, 91cbfa0, 9b9060c, 5d95fe0, eee485c, 4f65783, dc2772c, 578bd22, 1f8357b, 197860b, ed1ff1e, 7d7d653 |

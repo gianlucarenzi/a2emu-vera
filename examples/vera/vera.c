@@ -1,4 +1,4 @@
-/* vera.c -- find the A2VERA card's slot (see vera.h). */
+/* vera.c -- find the VERA card's slot: A2VERA or VERA Module RBL-A2 (see vera.h). */
 
 #include "vera.h"
 
@@ -12,9 +12,16 @@ unsigned char vera_detect(void)
 
     for (s = 1; s <= 7; ++s) {
         p = (volatile unsigned char *)(0xC000u + ((unsigned)s << 8));
-        /* only reads here: a disk controller's firmware is left alone */
-        if (p[1] == 0x20 && p[3] == 0x00 && p[5] == 0x03)
-            continue;
+        /* only reads here: a disk controller's firmware is left alone ... */
+        if (p[1] == 0x20 && p[3] == 0x00 && p[5] == 0x03) {
+            /* ... unless it is the VERA Module RBL-A2's: after a reset its ProDOS
+               slot ROM ("VERAS" at $CnF0) hides the VERA; $C0nF bit 0 = 1 puts
+               the VERA at $Cn00-$Cn1F (the ROM above $Cn1F stays) */
+            if (p[0xF0] != 'V' || p[0xF1] != 'E' || p[0xF2] != 'R' ||
+                p[0xF3] != 'A' || p[0xF4] != 'S')
+                continue;
+            *(volatile unsigned char *)(0xC08Fu + ((unsigned)s << 4)) = 0x01;
+        }
         /* an empty slot reads the floating bus, which can show anything once:
            CTRL must read back what was written, the identity twice */
         p[5] = 0x7E;                    /* CTRL: DCSEL 63 */

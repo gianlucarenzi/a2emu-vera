@@ -38,6 +38,10 @@
 #include "puce6502.h"
 #include "veracore.h"
 #include "a2core.h"
+#include "rbla2/a2_slinky.h"                 /* VERA Module RBL-A2: copies of its firmware */
+#include "rbla2/prodos_format.h"
+#include "rbla2/slinky_rom.h"
+static inline int rbl_on(void);                 /* VERA Module RBL-A2, see its section */
 #include "ym2151.h"
 #include "sdcard.h"
 #include <time.h>
@@ -137,7 +141,9 @@ void vera_bus_init(void)
           g_cyareg = 0x80; g_a2_speed_permille = g_gs_fast_permille;
       } }
     { const char *e = getenv("A2_VERA_IRQ"); g_vera_irq = e ? atoi(e) : 1;
-      e = getenv("A2_VERA_SLOT"); if (e && atoi(e) >= 1 && atoi(e) <= 7) g_vera_base = 0xC000 + atoi(e) * 0x100; }
+      e = getenv("A2_VERA_SLOT"); if (e && atoi(e) >= 1 && atoi(e) <= 7) g_vera_base = 0xC000 + atoi(e) * 0x100;
+      e = getenv("A2_VERA_CARD"); if (e && *e && !vera_card_set(e))
+          fprintf(stderr, "a2emu: unknown A2_VERA_CARD=%s (a2vera, rbl)\n", e); }
     vc_init(&g_vera);
     { const char *e = getenv("A2_SDCARD");                                       // SD card on the VERA's SPI
       if (e && *e && !sdcard_attach(e)) fprintf(stderr, "a2emu: cannot use SD card image %s\n", e); }
@@ -390,6 +396,7 @@ void fetchSyncRam(void) {                       /* $0000-$BFFF as reads see it *
 void fetchSyncCx(void) {                        /* $C000-$CFFF: slot / internal ROMs */
 	JIT_INVALIDATE();
 	memset(fetchMem + 0xC000, 0xFF, 0x1000);
+	if (rbl_on()) memcpy(fetchMem + g_vera_base, slinky_rom, 256);       /* RBL-A2 (the Disk II / hard disk win) */
 	memcpy(fetchMem + SL6START, sl6, SL6SIZE);
 	if (g_hd_present) memcpy(fetchMem + SL7START, sl7, sizeof sl7);
 	if (g_iie) {
@@ -520,6 +527,9 @@ void vera_slot_check(void) {
 		fprintf(stderr, "a2emu: warning: slot 6 holds the Disk II, the VERA card there is unreachable\n");
 	if (g_hd_present && g_vera_base == SL7START)
 		fprintf(stderr, "a2emu: warning: the hard disk takes slot 7, the VERA card there is unreachable\n");
+	if (g_vera_card == VERA_CARD_RBL && g_xmem_slot && 0xC000 + g_xmem_slot * 0x100 == g_vera_base)
+		fprintf(stderr, "a2emu: warning: the RBL-A2 holds its own RAM disk in slot %d, --xmem there is unreachable\n",
+		        g_xmem_slot);
 }
 
 int insertHardDisk(char *filename) {
@@ -1032,6 +1042,51 @@ __attribute__((constructor)) static void _cards_env(void) {
 }
 
 
+//=========================================== VERA MODULE RBL-A2 (VERA + Slinky)
+/* The VERA Module RBL-A2 (repository Vera-Module-RBL-A2, A2-SLINKY.md) holds the VERA and a
+   256 KB Apple II Memory Expansion Card ("Slinky") in ONE slot n, the VERA's (g_vera_base):
+     $C0n0-$C0n3  the Apple card's registers (address bits 0-7 / 8-15 / 16-23, $C0n2 reads
+                  OR $F0; data with auto-increment), $C0n4-$C0nF plain registers
+     $C0nF bit 0  1 = the VERA answers $Cn00-$Cn1F; 0 = the slot ROM does
+     $Cn00-$CnFF  the ProDOS slot ROM (block device, driver at $Cn33, "VERAS" at $CnF0);
+                  writes to it are ignored
+   A reset clears the registers, so the ROM is back and ProDOS finds the RAM disk at boot;
+   programs put the VERA back with $C0nF = 1 (libvera's start-up, examples/vera/vera.c).
+   The memory is formatted as an empty ProDOS volume /SLINKY when the card is chosen and
+   survives resets.  Model and ROM: copies of the card firmware's headers (rbla2/). */
+int     g_vera_card = VERA_CARD_A2VERA;
+uint8_t g_rbl_mem[RBL_MEM_SIZE];
+static Slinky g_rbl;
+_Static_assert(RBL_MEM_SIZE == SLINKY_SIZE, "rbla2/a2_slinky.h size");
+
+int vera_card_set(const char *name) {
+	if (!strcmp(name, "a2vera")) { g_vera_card = VERA_CARD_A2VERA; return 1; }
+	if (strcmp(name, "rbl") && strcmp(name, "rbl-a2")) return 0;
+	if (g_vera_card != VERA_CARD_RBL) {
+		g_vera_card = VERA_CARD_RBL;
+		slinky_init(&g_rbl, g_rbl_mem);
+		prodos_format(g_rbl_mem, SLINKY_BLOCKS, "SLINKY");
+	}
+	return 1;
+}
+
+/* the card is reachable: slot 6 always holds the Disk II, slot 7 the hard disk when one is in
+   (their firmware and $C0nx registers win, as for the A2VERA; vera_slot_check warns) */
+static inline int rbl_on(void) {
+	return g_vera_enabled && g_vera_card == VERA_CARD_RBL && g_vera_base != SL6START &&
+	       !(g_hd_present && g_vera_base == SL7START);
+}
+/* an address of the card's $Cn page that the slot ROM (not the VERA) answers */
+static inline int rbl_rom_at(uint16_t address) {
+	return rbl_on() && (address & 0xFF00) == g_vera_base &&
+	       !(slinky_vera_mapped(&g_rbl) && (address & 0xFF) < 0x20);
+}
+static uint8_t rbl_io(uint16_t address, uint8_t value, bool WRT) {
+	if (WRT) { slinky_write(&g_rbl, address & 0x0F, value); return 0; }
+	return slinky_read(&g_rbl, address & 0x0F);
+}
+
+
 //========================================== MEMORY MAPPED SOFT SWITCHES HANDLER
 // this function is called from readMem and writeMem
 // it complements both functions when address is in page $C0
@@ -1062,6 +1117,8 @@ uint8_t softSwitches(uint16_t address, uint8_t value, bool WRT) {
 			return (uint8_t)(((sm_sr1 & 0x8000) ? 0x80 : 0) | ((sm_sr2 & 0x8000) ? 0x40 : 0));
 		}
 	}
+	if (rbl_on() && (address & 0xFFF0) == 0xC080 + ((g_vera_base >> 4) & 0x70))
+		return rbl_io(address, value, WRT);                                       // RBL-A2 Slinky + VERA map
 	if (g_xmem_slot && (address & 0xFFF0) == 0xC080 + g_xmem_slot * 16) return xmem_io(address, value, WRT);
 	if (g_dbg_slot  && (address & 0xFFF0) == 0xC080 + g_dbg_slot  * 16) return dbg_io(address, value, WRT);
 	if (g_iie && address <= 0xC01F && address != 0xC010) {
@@ -1444,6 +1501,9 @@ static uint8_t readMemSlow_impl(uint16_t address) {
 	if (g_hd_present && (address & 0xFF00) == SL7START)
 		return sl7[address - SL7START];                                             // slot-7 block device firmware
 
+	if (rbl_rom_at(address))
+		return slinky_rom[address & 0xFF];                                          // RBL-A2 slot ROM
+
 	if (g_vera_enabled && (address & 0xFFE0) == g_vera_base) {
 		speedlog_note(1, g_cyareg, ticks);                                           // : speed at this access
 		vera_sync();                                                                 // the VERA as of this cycle
@@ -1487,6 +1547,7 @@ void writeMemSlow(uint16_t address, uint8_t value) {
 		return;
 	}
 
+	if (rbl_rom_at(address)) return;                                             // RBL-A2 slot ROM: ignored
 	if (g_vera_enabled && (address & 0xFFE0) == g_vera_base) {
 		speedlog_note(1, g_cyareg, ticks);                                           // : speed at this access
 		vera_sync();                                                                 // the VERA as of this cycle
@@ -1518,6 +1579,7 @@ void a2_reset(void) {
 		LCRD = false; LCBK2 = true; LCWR = true; LCWFF = false;
 		iie_update_memslow();
 	}
+	if (g_vera_card == VERA_CARD_RBL) slinky_reset(&g_rbl);       /* RBL-A2: registers cleared, ROM at $Cn00 */
 	fetchSyncAll();
 	puce6502RST();
 }

@@ -50,6 +50,22 @@ with the warning.
 
 The identity bytes read `'V'`, 48, 0, 1 (VERA 48.0.1).
 
+## VERA Module RBL-A2 (2026-11-12)
+
+The RBL-A2 keeps a ProDOS slot ROM at `$Cn00` after a reset, so step 1 would
+skip it: a slot with the signature is now taken when `$CnF0-$CnF4` read
+`"VERAS"`, after writing 1 to `$C0nF` (VERA at `$Cn00-$Cn1F`); any other
+disk controller is still only read.  `--vera-card rbl`, same disk:
+
+| VERA slot | ][+ | IIe | enhanced IIe |
+|-----------|-----|-----|--------------|
+| 1, 2, 3, 4, 5, 7 | found | found | found |
+| 6 | not found (Disk II), warning | not found, warning | not found, warning |
+| none (`--vera-slot 0`) | not found | not found | not found |
+
+With `--hd`: the RBL-A2 in slot 7 not found, with the warning.  The A2VERA
+table above was run again with the new probe: unchanged.
+
 ## Reproduce
 
     cd examples/test_font && make

@@ -85,6 +85,14 @@ void vera_bus_init(void);
 extern uint16_t g_vera_base;                // $Cn00 of the VERA card (A2_VERA_SLOT)
 void vera_slot_check(void);                 // warn when the slot is taken by the Disk II / hard disk
 void cpu_vera_step(void);                   // ~32 CPU cycles + VERA (59.52 Hz) + IRQ line
+// which card holds the VERA: the A2VERA, or the VERA Module RBL-A2 (VERA + 256 KB Slinky RAM disk
+// with a ProDOS slot ROM in the same slot; A2_VERA_CARD=rbl, a2run --vera-card rbl)
+#define VERA_CARD_A2VERA 0
+#define VERA_CARD_RBL    1
+#define RBL_MEM_SIZE     (256u * 1024u)
+extern int      g_vera_card;
+extern uint8_t  g_rbl_mem[RBL_MEM_SIZE];    // the RBL-A2's RAM disk (formatted /SLINKY at selection)
+int  vera_card_set(const char *name);       // "a2vera" | "rbl": 0 on an unknown name
 
 // RAM card (Slinky, E5) and debug card (E7)
 extern int      g_xmem_slot;
