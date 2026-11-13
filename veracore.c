@@ -567,6 +567,103 @@ static const uint8_t vera_version_string[] = {
 static float    vga_scan_pos_x;
 static uint16_t vga_scan_pos_y;
 int vc_norender = 0;             /* set to skip the scanline renderer (measurements): vsync still fires, framebuffer isn't drawn */
+
+/* VeraRenderer (veracore.h vc_set_renderer): EXACT builds every line from the
+ * VRAM and the registers (no source line kept, tile layers decoded to the full
+ * width, no composed row copied); FAST takes those shortcuts (the same pixels:
+ * any write that can change a line drops them, f9eb86e); AUTO starts EXACT and
+ * keeps it while it costs at most half a VERA frame of host time and the
+ * emulator keeps up with real time, else FAST, tried again every 10 s (the
+ * same rule as the VICE and atari800 forks, vera_video.c) */
+#include <time.h>
+#define VC_AUTO_FRAMES 180
+#define VC_AUTO_PROBE  30
+#define VC_AUTO_PERIOD 600
+#define VC_AUTO_BUDGET 0.5
+#define VC_FRAME_MS    16.8
+static int    vc_mode = VC_RENDER_AUTO;
+static int    vc_exact = 1;
+static int    vc_auto_frames, vc_auto_probe, vc_auto_wn;
+static int    vc_auto_shown = -1;
+static double vc_auto_ns, vc_auto_wall, vc_auto_last;
+
+static double vc_now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e9 + (double)ts.tv_nsec;
+}
+
+static void vc_auto_reset(void)
+{
+    vc_auto_frames = 0;
+    vc_auto_ns = vc_auto_wall = 0.0;
+    vc_auto_wn = 0;
+}
+
+static void vc_auto_set(int exact, double ms, double wall)
+{
+    if (exact != vc_auto_shown)
+        fprintf(stderr, "VERA renderer auto: exact costs %.2f ms a frame, a frame every %.2f ms -> %s\n",
+                ms, wall, exact ? "exact" : "fast");
+    vc_auto_shown = exact;
+    vc_exact = exact;
+    vc_auto_reset();
+}
+
+static void vc_auto_frame(void)
+{
+    const double budget = VC_AUTO_BUDGET * VC_FRAME_MS;
+    double now = vc_now_ns(), ms, wall;
+    int behind;
+
+    if (vc_auto_last > 0.0 && now - vc_auto_last < 100e6) {
+        vc_auto_wall += now - vc_auto_last;
+        vc_auto_wn++;
+    }
+    vc_auto_last = now;
+    vc_auto_frames++;
+    if (vc_exact && vc_auto_frames >= (vc_auto_probe ? VC_AUTO_PROBE : VC_AUTO_FRAMES)) {
+        ms = vc_auto_ns / vc_auto_frames / 1e6;
+        wall = vc_auto_wn ? vc_auto_wall / vc_auto_wn / 1e6 : VC_FRAME_MS;
+        behind = wall > VC_FRAME_MS * 1.03;
+        if (vc_auto_probe) {
+            vc_auto_probe = 0;
+            vc_auto_set(ms < 0.7 * budget && !behind, ms, wall);
+        } else {
+            vc_auto_set(ms <= budget && !behind, ms, wall);
+        }
+    } else if (!vc_exact && vc_auto_frames >= VC_AUTO_PERIOD) {
+        vc_exact = 1;                           /* the probe (vc_auto_shown stays FAST) */
+        vc_auto_probe = 1;
+        vc_auto_reset();
+    }
+}
+
+void vc_set_renderer(int mode)
+{
+    if (mode < VC_RENDER_EXACT || mode > VC_RENDER_AUTO)
+        return;
+    vc_mode = mode;
+    vc_exact = mode != VC_RENDER_FAST;
+    vc_auto_probe = 0;
+    vc_auto_shown = mode == VC_RENDER_AUTO ? -1 : vc_exact;
+    vc_auto_reset();
+}
+
+int vc_get_renderer(void)
+{
+    return vc_exact ? VC_RENDER_EXACT : VC_RENDER_FAST;
+}
+
+int vc_renderer_parse(const char *name)
+{
+    static const char *const names[] = { "exact", "fast", "auto" };
+    for (int i = 0; i < 3; i++)
+        if (name && strcmp(name, names[i]) == 0)
+            return i;
+    return -1;
+}
 static float    ntsc_half_cnt;
 static uint16_t ntsc_scan_pos_y;
 static int      frame_count;
@@ -1464,8 +1561,22 @@ calculate_line_col_index(uint8_t spr_zindex, uint8_t spr_col_index, uint8_t l1_c
     return col_index;
 }
 
+static void render_line_inner(uint16_t y, float scan_pos_x);
+
 static void
 render_line(uint16_t y, float scan_pos_x)
+{
+    if (vc_mode == VC_RENDER_AUTO && vc_exact) {
+        double t0 = vc_now_ns();
+        render_line_inner(y, scan_pos_x);
+        vc_auto_ns += vc_now_ns() - t0;
+    } else {
+        render_line_inner(y, scan_pos_x);
+    }
+}
+
+static void
+render_line_inner(uint16_t y, float scan_pos_x)
 {
     static uint16_t y_prev;
     static uint16_t s_pos_x_p;
@@ -1517,7 +1628,7 @@ render_line(uint16_t y, float scan_pos_x)
         uint16_t eff_y = (eff_y_fp >> 16);
         if (eff_y >= 480) eff_y = 480 - (ly & 1);
         line_src = eff_y;
-        if (ly < SCREEN_HEIGHT && eff_y == line_built_y && vc_wver == line_built_wver
+        if (!vc_exact && ly < SCREEN_HEIGHT && eff_y == line_built_y && vc_wver == line_built_wver
             && (dc_video & 0x70) == line_built_en) {
             /* the same source line as the line before, nothing written: as built */
         } else if (ly < SCREEN_HEIGHT) {
@@ -1527,7 +1638,7 @@ render_line(uint16_t y, float scan_pos_x)
             if (he > SCREEN_WIDTH) he = SCREEN_WIDTH;
             if (he > hs)
                 need = (int)((((uint32_t)(he - hs - 1) * reg_composer[1]) << 9) >> 16) + 2;
-            if (need > SCREEN_WIDTH) need = SCREEN_WIDTH;
+            if (need > SCREEN_WIDTH || vc_exact) need = SCREEN_WIDTH;
             line_built_y = eff_y;
             line_built_wver = vc_wver;
             line_built_en = dc_video & 0x70;
@@ -1576,7 +1687,7 @@ render_line(uint16_t y, float scan_pos_x)
     /* VGA, the whole line now, the same source line as the line above composed
        in one go, nothing written since: the same pixels */
     const bool whole = s_pos_x_p == 0 && s_pos_x == SCREEN_WIDTH && out_mode == 1;
-    if (whole && comp_y >= 0 && comp_y == y - 1 && comp_wver == vc_wver && comp_src == line_src
+    if (!vc_exact && whole && comp_y >= 0 && comp_y == y - 1 && comp_wver == vc_wver && comp_src == line_src
         && y >= vstart && y < vstop && comp_y >= vstart) {
         uint32_t *fb = (uint32_t *)framebuffer + y * SCREEN_WIDTH;
         memcpy(fb, fb - SCREEN_WIDTH, SCREEN_WIDTH * sizeof *fb);
@@ -1667,6 +1778,7 @@ update_isr_and_coll(uint16_t y, uint16_t compare)
         isr = (isr & 0xf) | sprite_line_collisions;
         sprite_line_collisions = 0;
         isr |= 1; vc_vsync_raised++; /* VSYNC IRQ */
+        if (vc_mode == VC_RENDER_AUTO) vc_auto_frame();
         if (!vc_norender) memcpy(frontbuffer, framebuffer, sizeof frontbuffer);
     }
     if (y == compare)

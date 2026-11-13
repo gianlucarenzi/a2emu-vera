@@ -95,6 +95,17 @@ void vc_vsync_irq(vc_t *v);
 uint8_t *vc_vram(void);
 uint8_t *vc_palette(void);
 void vc_palette_dirty(void);
+
+/* VeraRenderer: EXACT every line built from VRAM and registers, FAST the
+ * shortcuts (same pixels by design), AUTO (default) EXACT while it costs at
+ * most half a VERA frame and the emulator keeps up with real time, else FAST
+ * (veracore.c).  vc_renderer_parse("exact" | "fast" | "auto") -> mode, -1. */
+#define VC_RENDER_EXACT 0
+#define VC_RENDER_FAST  1
+#define VC_RENDER_AUTO  2
+void vc_set_renderer(int mode);
+int  vc_get_renderer(void);
+int  vc_renderer_parse(const char *name);
 void vc_set_sprite(int idx, const uint8_t *b8);
 void vc_psg_write(uint8_t reg, uint8_t val);
 

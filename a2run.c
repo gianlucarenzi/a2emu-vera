@@ -26,6 +26,10 @@
  *                           and a 256 KB Slinky RAM disk with a ProDOS slot ROM in the VERA's slot
  *                           (the VERA answers $Cn00-$Cn1F once $C0nF bit 0 = 1, cleared by reset)
  *     --rbl-image F         preload the RBL-A2 RAM disk from F;  --rbl-dump F  save it at exit
+ *     --vera-renderer M     exact | fast | auto (default; env A2_VERA_RENDERER): exact builds
+ *                           every VERA line from VRAM and registers, fast takes the shortcuts
+ *                           (same pixels), auto = exact while it costs at most half a frame
+ *                           and the emulator keeps up with real time
  *     --phantom off|nmos|65c02   6502 dummy-read model (default nmos)
  *     --xmem KB             RAM card ("Slinky") of KB kilobytes (power of two)
  *     --xmem-slot N         its slot (default 5)
@@ -219,7 +223,7 @@ int main(int argc, char **argv) {
 	  else snprintf(romdir, sizeof romdir, "rom"); }
 	const char *hd = NULL, *sdcard = NULL; int writeback = 1;
 	const char *disk1 = NULL, *disk2 = NULL, *xmem_img = NULL, *xmem_dump = NULL;
-	const char *vera_card = NULL, *rbl_img = NULL, *rbl_dump = NULL;
+	const char *vera_card = NULL, *rbl_img = NULL, *rbl_dump = NULL, *vera_renderer = NULL;
 	const char *shot_exit = NULL, *keys = NULL, *loads[32]; int nloads = 0;
 	long pc = -1; unsigned long long max_cycles = 0; long max_frames = 0;
 	int vera_slot = 0, vslot_given = 0, vera_irq = -1, phantom = 1, xmem_kb = 0, xmem_slot = 5, dbg_slot = 3;
@@ -247,6 +251,7 @@ int main(int argc, char **argv) {
 		else if (!strcmp(a, "--vera-slot"))   { vera_slot = atoi(ARG); vslot_given = 1; }
 		else if (!strcmp(a, "--vera-irq"))    vera_irq = strcmp(ARG, "off") != 0;
 		else if (!strcmp(a, "--vera-card"))   vera_card = ARG;
+		else if (!strcmp(a, "--vera-renderer")) vera_renderer = ARG;
 		else if (!strcmp(a, "--rbl-image"))   rbl_img = ARG;
 		else if (!strcmp(a, "--rbl-dump"))    rbl_dump = ARG;
 		else if (!strcmp(a, "--phantom"))     { const char *m = ARG; phantom = !strcmp(m, "off") ? 0 : !strcmp(m, "65c02") ? 3 : 1; phantom_given = 1; }
@@ -300,6 +305,11 @@ int main(int argc, char **argv) {
 		if (*e == ',') { zpmin_top = (unsigned)strtol(e + 1, NULL, 0); zpmin_arm = 0; }
 	}
 	vera_bus_init();                                  /* env defaults first, then the flags win */
+	if (vera_renderer) {
+		int m = vc_renderer_parse(vera_renderer);
+		if (m < 0) { fprintf(stderr, "a2run: --vera-renderer exact|fast|auto\n"); return 2; }
+		vc_set_renderer(m);
+	}
 	if (vera_card && !vera_card_set(vera_card)) { fprintf(stderr, "a2run: --vera-card a2vera|rbl\n"); return 2; }
 	if ((rbl_img || rbl_dump) && g_vera_card != VERA_CARD_RBL) { fprintf(stderr, "a2run: --rbl-image/--rbl-dump need --vera-card rbl\n"); return 2; }
 	if (rbl_img) {

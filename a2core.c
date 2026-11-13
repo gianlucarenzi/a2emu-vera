@@ -145,6 +145,10 @@ void vera_bus_init(void)
       e = getenv("A2_VERA_CARD"); if (e && *e && !vera_card_set(e))
           fprintf(stderr, "a2emu: unknown A2_VERA_CARD=%s (a2vera, rbl)\n", e); }
     vc_init(&g_vera);
+    { const char *e = getenv("A2_VERA_RENDERER");                                // exact | fast | auto (default)
+      if (e && *e) { int m = vc_renderer_parse(e);
+          if (m >= 0) vc_set_renderer(m);
+          else fprintf(stderr, "a2emu: unknown A2_VERA_RENDERER=%s (exact, fast, auto)\n", e); } }
     { const char *e = getenv("A2_SDCARD");                                       // SD card on the VERA's SPI
       if (e && *e && !sdcard_attach(e)) fprintf(stderr, "a2emu: cannot use SD card image %s\n", e); }
     { const char *e = getenv("A2_YM"); ym_init(e ? atoi(e) : 0); }               // E14: optional chip, default absent
